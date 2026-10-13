@@ -2,5 +2,8 @@
 data/seed.js
 supabase/02_匯入資料.sql
 
+# Claude Code 本機預覽設定
+.claude/
+
 # 圖片審查用的暫存頁（候選清單由腳本產生，可隨時重建）
 tools/review/
