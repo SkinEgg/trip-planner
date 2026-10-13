@@ -1,0 +1,6 @@
+# 含私人資料（候選地點、私人標籤），不可上傳到 GitHub
+data/seed.js
+supabase/02_匯入資料.sql
+
+# 圖片審查用的暫存頁（候選清單由腳本產生，可隨時重建）
+tools/review/

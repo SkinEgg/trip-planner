@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>旅行決策</title>
+<meta name="description" content="旅行候選地點的篩選與地圖判斷工具">
+<meta name="theme-color" content="#b3433f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="旅行決策">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="title" id="tripTitle">旅行決策</div>
+      <button class="date-btn" id="dateBtn" title="查看哪一天的公休狀態">📅 <span id="dateLabel">今天</span></button>
+      <input type="date" id="dateInput" class="visually-hidden" tabindex="-1" aria-hidden="true">
+      <span class="sync-pill" id="syncPill"></span>
+    </div>
+    <div class="quick-row" id="quickRow"></div>
+  </header>
+
+  <div class="body">
+    <aside class="sidebar" id="sidebar" aria-label="篩選"></aside>
+    <main class="views">
+      <section class="view" id="mapView">
+        <div id="map"></div>
+        <button class="fab" id="locateBtn" title="顯示我的位置">◎</button>
+        <div class="peek" id="peek" hidden></div>
+      </section>
+      <section class="view" id="listView">
+        <div class="list-tools">
+          <input type="search" id="searchInput" placeholder="搜尋名稱、標籤、地址…" autocomplete="off">
+          <select id="sortSel" aria-label="排序">
+            <option value="rec">推薦排序</option>
+            <option value="dist">距離近→遠</option>
+            <option value="region">依地區</option>
+          </select>
+        </div>
+        <div class="list-count" id="listCount"></div>
+        <div id="list"></div>
+      </section>
+      <section class="view" id="moreView"></section>
+    </main>
+  </div>
+
+  <nav class="bottom-nav">
+    <button data-tab="map" class="active"><span>🗺️</span>地圖</button>
+    <button data-tab="list"><span>📋</span>清單</button>
+    <button data-tab="more"><span>☰</span>更多</button>
+  </nav>
+</div>
+
+<!-- 篩選（手機：底部抽屜；電腦：左側欄） -->
+<div class="sheet-backdrop" id="filterBackdrop" hidden></div>
+<div class="sheet" id="filterSheet" hidden role="dialog" aria-label="篩選"></div>
+
+<!-- 地點詳情 -->
+<div class="sheet-backdrop" id="detailBackdrop" hidden></div>
+<div class="sheet detail-sheet" id="detailSheet" hidden role="dialog" aria-label="地點詳情"></div>
+
+<!-- 登入（雲端模式） -->
+<div class="login" id="loginScreen" hidden>
+  <form class="login-box" id="loginForm">
+    <h1>旅行決策</h1>
+    <p>登入後才能讀取雲端資料。</p>
+    <label>Email<input type="email" id="loginEmail" autocomplete="username" required></label>
+    <label>密碼<input type="password" id="loginPassword" autocomplete="current-password" required></label>
+    <button type="submit" id="loginSubmit">登入</button>
+    <div class="login-error" id="loginError"></div>
+  </form>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="js/config.js"></script>
+<script src="data/seed.js"></script>
+<script src="data/photos.js"></script>
+<script src="js/logic.js"></script>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
