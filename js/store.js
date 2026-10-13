@@ -70,7 +70,7 @@
     items = applyPendingOnTop((LS.get(K_CACHE, []) || []).map(withDefaults));
     emit();
     try {
-      if (!window.supabase) await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js");
+      if (!window.supabase) await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js");
       client = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, {
         auth: { persistSession: true, autoRefreshToken: true, storageKey: "tripapp.auth" }
       });

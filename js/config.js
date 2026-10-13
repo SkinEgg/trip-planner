@@ -4,8 +4,8 @@
    放在網頁裡沒關係；資料安全靠登入＋資料表的存取規則保護。
    絕對不要填 secret key／service_role key。 */
 window.APP_CONFIG = {
-  supabaseUrl: "",
-  supabaseKey: "",
+  supabaseUrl: "https://jftwkboltjmvxcbvtldi.supabase.co",
+  supabaseKey: "sb_publishable_nsVhS7OU5eQ87hkY_t1EyQ_SW9eiU3Q",
 
   // 旅行清單：之後岡山等新旅行加在這裡。center/zoom 是地圖預設位置。
   trips: [
