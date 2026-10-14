@@ -174,7 +174,9 @@
     onChange(fn) { listeners.push(fn); },
 
     async init() {
-      if (CFG.supabaseUrl && CFG.supabaseKey) await initCloud();
+      // 網址加 ?local=1 強制用本機資料（開發測試用；線上版沒有 data/seed.js，所以會是空的）
+      const forceLocal = /[?&]local=1\b/.test(location.search);
+      if (CFG.supabaseUrl && CFG.supabaseKey && !forceLocal) await initCloud();
       else { loadLocal(); emit(); }
     },
 

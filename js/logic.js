@@ -13,11 +13,12 @@
   }
   function norm(s) { return (s || "").toLowerCase().replace(/[\s　,，。()（）「」『』【】\-・]/g, ""); }
 
-  /* 是否為餐飲類（沿用第 8 版規則）：主類型是「購物」一律不算；
-     其餘只要有一段是 美食／咖啡／茶／甜點／飲品…就算餐飲。 */
+  /* 是否為餐飲類：2026-10-15 起類型是「大類／細類」，大類「餐廳」才算餐飲。
+     舊格式（美食／咖啡／茶…）沿用第 8 版規則：主類型是「購物」一律不算。 */
   function deriveIsFood(category) {
     const segs = (category || "").split("／").map(s => s.replace(/（.*?）|\(.*?\)/g, "").trim()).filter(Boolean);
-    if (!segs.length || segs[0] === "購物") return false;
+    if (segs[0] === "餐廳") return true;
+    if (!segs.length || segs[0] === "購物" || segs[0] === "風景") return false;
     return segs.some(s => ["美食", "咖啡", "茶", "甜點", "飲品", "茶屋", "茶館", "茶房", "茶寮"].includes(s) || /美食|咖啡|甜點/.test(s));
   }
   function gmTierOf(s) { return s == null ? null : s >= 4.5 ? "good" : s >= 4.0 ? "mid" : "bad"; }
@@ -38,40 +39,68 @@
     return round2((combo || 0) + (exp || 0));
   }
 
-  /* 類型大類：給快速篩選與圖示用（原始類型字串不變） */
+  /* 類型分兩層（使用者 2026-10-15 決定）：類型欄位寫成「大類／細類」，例如「餐廳／拉麵」。
+     大類只有三種；細類是篩選第二層。改這裡就會同時改篩選選單與編輯選單。 */
   const GROUPS = [
-    { id: "food", label: "美食", icon: "🍜" },
-    { id: "cafe", label: "咖啡茶點", icon: "🍵" },
-    { id: "shop", label: "購物", icon: "🛍️" },
-    { id: "shrine", label: "神社寺院", icon: "⛩️" },
-    { id: "sight", label: "景點活動", icon: "🌿" },
-    { id: "other", label: "其他", icon: "📍" }
+    { id: "sight", label: "風景", icon: "🌿", subs: ["神社寺院", "自然公園", "街道地標", "季節活動"] },
+    { id: "shop", label: "購物", icon: "🛍️", subs: ["百貨商場", "工藝器物", "生活雜貨", "伴手禮", "古董二手", "選物服飾"] },
+    { id: "food", label: "餐廳", icon: "🍜", subs: ["拉麵", "正餐", "小吃", "咖啡", "茶飲", "甜點"] }
   ];
+  function splitCategory(category) {
+    const [main, ...rest] = (category || "").split("／");
+    return { main: main.trim(), sub: rest.join("／").trim() };
+  }
   function groupOf(item) {
+    const { main } = splitCategory(item.category);
+    const g = GROUPS.find(x => x.label === main);
+    if (g) return g.id;
+    // 舊格式的類型（尚未改成兩層的資料）
     const c = item.category || "";
     if (/^購物/.test(c)) return "shop";
-    if (/神社|寺/.test(c)) return "shrine";
-    if (/美食|拉麵|餐/.test(c)) return "food";
-    if (/咖啡|茶|甜點|飲品/.test(c)) return "cafe";
-    if (/景點|活動|自然|公園|街並み/.test(c)) return "sight";
-    return "other";
+    if (/美食|拉麵|餐|咖啡|茶|甜點|飲品/.test(c)) return "food";
+    return "sight";
   }
+  function subOf(item) { return splitCategory(item.category).sub; }
 
+  const SUB_ICON = {
+    "神社寺院": "⛩️", "自然公園": "🌳", "街道地標": "🏮", "季節活動": "🎆",
+    "百貨商場": "🏬", "工藝器物": "🏺", "生活雜貨": "🛍️", "伴手禮": "🎁", "古董二手": "📚", "選物服飾": "👕",
+    "拉麵": "🍜", "正餐": "🍽️", "小吃": "🍢", "咖啡": "☕", "茶飲": "🍵", "甜點": "🍡"
+  };
   const TYPE_ICON = [
     ["神社", "⛩️"], ["寺", "⛩️"], ["購物", "🛍️"], ["咖啡", "☕"], ["茶", "🍵"], ["甜點", "🍡"],
     ["美食", "🍜"], ["活動", "🎏"], ["公園", "🌳"], ["自然", "🌿"], ["景點", "📍"], ["伴手禮", "🎁"]
   ];
   function typeIcon(item) {
+    const sub = subOf(item);
+    if (SUB_ICON[sub]) return SUB_ICON[sub];
+    const g = GROUPS.find(x => x.id === groupOf(item));
     const c = item.category || "";
     for (const [k, v] of TYPE_ICON) if (c.includes(k)) return v;
-    return "📍";
+    return g ? g.icon : "📍";
   }
   function isGinkgo(item) { return (item.tags || []).some(t => String(t).startsWith("銀杏")); }
 
-  function regionGroup(region) {
-    const base = (region || "").replace(/（.*?）|\(.*?\)/g, "").trim();
-    return base || "未分類";
+  /* 地區分三層（使用者 2026-10-15 決定）：「都道府縣／區市／車站」，例如「東京都／台東区／浅草」。
+     步行超過 30 分鐘的車站寫「無臨近車站」。舊格式（單一區域名）整串當成車站，放在「其他」底下。 */
+  const NO_STATION = "無臨近車站";
+  function splitRegion(region) {
+    const parts = (region || "").split("／").map(s => s.trim());
+    if (parts.length >= 3) return { pref: parts[0], muni: parts[1], station: parts.slice(2).join("／") };
+    const base = (region || "").replace(/（.*?）|\(.*?\)/g, "").trim() || "未分類";
+    return { pref: "其他", muni: "其他", station: base };
   }
+  // 篩選用的鍵：用完整路徑，避免不同縣市有同名的區或車站
+  function regionKeys(item) {
+    const r = splitRegion(item.region);
+    return { pref: r.pref, muni: r.pref + "／" + r.muni, station: r.pref + "／" + r.muni + "／" + r.station, r };
+  }
+  // 卡片上顯示的短名稱：車站；沒有臨近車站時顯示區市
+  function regionLabel(item) {
+    const r = splitRegion(item.region);
+    return r.station === NO_STATION ? r.muni + "・" + NO_STATION : r.station;
+  }
+  function regionGroup(region) { return splitRegion(region).station; }
 
   function verifyLevel(v) {
     if (!v) return "none";
@@ -183,7 +212,8 @@
 
   window.Logic = {
     round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore,
-    GROUPS, groupOf, typeIcon, isGinkgo, regionGroup, verifyLevel,
+    GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, regionGroup, verifyLevel,
+    NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl
   };
 })();

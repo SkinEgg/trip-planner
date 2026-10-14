@@ -24,10 +24,11 @@
     sel: null,          // 地圖上選取中的地點
     detail: null,       // 詳情開啟中的地點
     me: null,           // 我的位置 [lat, lng]
-    f: Object.assign({ must: false, groups: [], regions: [], cats: [], tags: [], verify: "", minExp: "", hideClosed: false, showArchived: false }, saved.f || {})
+    f: Object.assign({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], verify: "", minExp: "", hideClosed: false, showArchived: false }, saved.v === 2 ? saved.f : {})
   };
   if (!CFG.trips.some(t => t.id === state.trip)) state.trip = CFG.defaultTrip;
-  function persistUi() { LS.set("tripapp.ui.v1", { tab: state.tab, trip: state.trip, sort: state.sort, f: state.f }); }
+  // v: 2 = 地區改三層後的篩選格式；舊版存的篩選條件不沿用
+  function persistUi() { LS.set("tripapp.ui.v1", { v: 2, tab: state.tab, trip: state.trip, sort: state.sort, f: state.f }); }
   function tripCfg() { return CFG.trips.find(t => t.id === state.trip) || CFG.trips[0]; }
 
   /* ---------------- 共用小工具 ---------------- */
@@ -51,13 +52,35 @@
     return null;
   }
 
+  /* 類型兩層篩選：沒選任何類型＝全部；某大類底下有選細類，就只留那些細類；
+     只選了大類（沒選它的細類）＝整個大類 */
+  function categoryPasses(it) {
+    const f = state.f;
+    if (!f.groups.length && !f.subs.length) return true;
+    const g = L_.GROUPS.find(x => x.id === L_.groupOf(it));
+    const pickedSubs = g ? f.subs.filter(s => g.subs.includes(s)) : [];
+    if (pickedSubs.length) return pickedSubs.includes(L_.subOf(it));
+    return f.groups.includes(L_.groupOf(it));
+  }
+
+  /* 地區三層篩選：同一個縣市底下有選區市，就只留那些區市；同一個區市底下有選車站，就只留那些車站 */
+  function regionPasses(it) {
+    const f = state.f;
+    if (!f.prefs.length && !f.munis.length && !f.regions.length) return true;
+    const k = L_.regionKeys(it);
+    const stationsHere = f.regions.filter(s => s.startsWith(k.muni + "／"));
+    if (stationsHere.length) return stationsHere.includes(k.station);
+    const munisHere = f.munis.filter(m => m.startsWith(k.pref + "／"));
+    if (munisHere.length) return munisHere.includes(k.muni);
+    return f.prefs.includes(k.pref);
+  }
+
   function passes(it) {
     const f = state.f;
     if (!f.showArchived && it.archived) return false;
     if (f.must && !it.must_go) return false;
-    if (f.groups.length && !f.groups.includes(L_.groupOf(it))) return false;
-    if (f.regions.length && !f.regions.includes(L_.regionGroup(it.region))) return false;
-    if (f.cats.length && !f.cats.includes(it.category)) return false;
+    if (!regionPasses(it)) return false;
+    if (!categoryPasses(it)) return false;
     if (f.tags.length && !(it.tags || []).some(t => f.tags.includes(t))) return false;
     if (f.verify && L_.verifyLevel(it.verify) !== f.verify) return false;
     if (f.minExp && !(typeof it.expectation === "number" && it.expectation >= +f.minExp)) return false;
@@ -71,7 +94,7 @@
   function filtered() { return tripItems().filter(passes); }
   function activeFilterCount() {
     const f = state.f;
-    return f.regions.length + f.cats.length + f.tags.length + (f.verify ? 1 : 0) + (f.minExp ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
+    return f.prefs.length + f.munis.length + f.regions.length + f.subs.length + f.tags.length + (f.verify ? 1 : 0) + (f.minExp ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
   }
 
   /* 分數顯示：餐飲＝總分（顏色依目前篩選結果中的相對排名，前／中／後三分之一）；非餐飲＝期待度 */
@@ -110,7 +133,7 @@
     const n = activeFilterCount();
     $("#quickRow").innerHTML =
       `<button class="chip must ${state.f.must ? "on" : ""}" data-q="must">⭐ 必去</button>` +
-      L_.GROUPS.filter(g => groupsPresent.has(g.id) && g.id !== "other").map(g =>
+      L_.GROUPS.filter(g => groupsPresent.has(g.id)).map(g =>
         `<button class="chip ${state.f.groups.includes(g.id) ? "on" : ""}" data-q="g:${g.id}">${g.icon} ${g.label}</button>`).join("") +
       `<button class="chip filter-btn" data-q="filter">⚙️ 篩選${n ? `<span class="dot">${n}</span>` : ""}</button>`;
   }
@@ -119,7 +142,11 @@
     const q = b.dataset.q;
     if (q === "must") state.f.must = !state.f.must;
     else if (q === "filter") { openFilter(); return; }
-    else if (q.startsWith("g:")) toggleIn(state.f.groups, q.slice(2));
+    else if (q.startsWith("g:")) {
+      const id = q.slice(2);
+      toggleIn(state.f.groups, id);
+      if (!state.f.groups.includes(id)) { const g = L_.GROUPS.find(x => x.id === id); state.f.subs = state.f.subs.filter(s => !g.subs.includes(s)); }
+    }
     changed();
   });
   function toggleIn(arr, v) { const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); else arr.push(v); }
@@ -142,7 +169,7 @@
     const s = scoreInfo(it, ranks);
     const c = closedInfo(it);
     const d = distOf(it);
-    const subs = [esc(L_.regionGroup(it.region))];
+    const subs = [esc(L_.regionLabel(it))];
     if (c) subs.push(`<span class="badge ${c.cls}">${esc(c.text)}</span>`);
     if (d != null) subs.push("📍 " + L_.fmtDistance(d));
     if (it.archived) subs.push(`<span class="badge b-arch">封存</span>`);
@@ -172,9 +199,10 @@
     if (!list.length) { $("#list").innerHTML = `<div class="empty">目前的條件下沒有符合的地點。<br>試著放寬篩選或清除搜尋。</div>`; return; }
     if (sort === "region") {
       const groups = new Map();
-      list.forEach(it => { const g = L_.regionGroup(it.region); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(it); });
-      const names = [...groups.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
-      $("#list").innerHTML = names.map(g => `<div class="group-head">${esc(g)}（${groups.get(g).length}）</div>` +
+      // 依「區市 › 車站」分組，同一區市的車站排在一起
+      list.forEach(it => { const r = L_.splitRegion(it.region); const g = `${r.pref}／${r.muni}／${r.station}`; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(it); });
+      const names = [...groups.keys()].sort((a, b) => a.localeCompare(b, "ja"));
+      $("#list").innerHTML = names.map(g => `<div class="group-head">${esc(g.split("／").slice(1).join(" › "))}（${groups.get(g).length}）</div>` +
         groups.get(g).map(it => cardHtml(it, ranks, true)).join("")).join("");
     } else {
       $("#list").innerHTML = list.map(it => cardHtml(it, ranks, true)).join("");
@@ -336,10 +364,35 @@
     const items = tripItems();
     const f = state.f;
     const uniq = arr => [...new Set(arr)].filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-Hant"));
-    const regions = uniq(items.map(it => L_.regionGroup(it.region)));
-    const cats = uniq(items.map(it => it.category));
     const tags = uniq(items.flatMap(it => it.tags || []));
-    const chip = (kind, v, label, on) => `<button class="chip ${on ? "on" : ""}" data-f="${kind}" data-v="${esc(v)}">${esc(label)}</button>`;
+    const chip = (kind, v, label, on, extra) => `<button class="chip ${on ? "on" : ""}" data-f="${kind}" data-v="${esc(v)}" ${extra || ""}>${esc(label)}</button>`;
+    // 地區三層：都道府縣 → 選了才展開區市 → 選了區市才展開車站；都依地點數多→少排列，標上筆數
+    const visible = items.filter(it => !it.archived || f.showArchived);
+    const countBy = (keyFn, filterFn) => {
+      const c = {}; visible.filter(filterFn || (() => true)).forEach(it => { const k = keyFn(L_.regionKeys(it)); c[k] = (c[k] || 0) + 1; });
+      return Object.keys(c).sort((a, b) => c[b] - c[a] || a.localeCompare(b, "ja")).map(k => [k, c[k]]);
+    };
+    const last = k => k.split("／").pop();
+    const regionHtml = countBy(k => k.pref).map(([pref, n]) => {
+      const open = f.prefs.includes(pref);
+      const munis = open ? countBy(k => k.muni, it => L_.regionKeys(it).pref === pref) : [];
+      return `<div class="cat-group">${chip("prefs", pref, `${pref} ${n}`, open)}
+        ${open ? `<div class="cat-subs">${munis.map(([muni, m]) => {
+          const mOpen = f.munis.includes(muni);
+          const stations = mOpen ? countBy(k => k.station, it => L_.regionKeys(it).muni === muni) : [];
+          return `<div class="region-muni">${chip("munis", muni, `${last(muni)} ${m}`, mOpen)}
+            ${mOpen ? `<div class="chips region-stations">${stations.map(([st, s]) => chip("regions", st, `${last(st)} ${s}`, f.regions.includes(st))).join("")}</div>` : ""}</div>`;
+        }).join("")}</div>` : ""}
+      </div>`;
+    }).join("");
+    // 類型兩層：大類一列，底下是它在資料裡實際有的細類
+    const catHtml = L_.GROUPS.filter(g => items.some(it => L_.groupOf(it) === g.id)).map(g => {
+      const present = g.subs.filter(s => items.some(it => L_.groupOf(it) === g.id && L_.subOf(it) === s));
+      return `<div class="cat-group">
+        ${chip("groups", g.id, g.icon + " " + g.label, f.groups.includes(g.id))}
+        <div class="chips cat-subs">${present.map(s => chip("subs", s, s, f.subs.includes(s), `data-g="${g.id}"`)).join("")}</div>
+      </div>`;
+    }).join("");
     const sw = (key, label) => `<div class="f-row"><span>${label}</span><label class="switch"><input type="checkbox" data-sw="${key}" ${f[key] ? "checked" : ""}><span></span></label></div>`;
     const count = filtered().length;
     return `
@@ -355,12 +408,12 @@
         ${sw("showArchived", "顯示已封存")}
       </div>
       <div class="f-sec">
-        <div class="f-title">地區${f.regions.length ? '<button data-f="clr-regions">清除</button>' : ""}</div>
-        <div class="chips">${regions.map(r => chip("regions", r, r, f.regions.includes(r))).join("")}</div>
+        <div class="f-title">類型${f.groups.length || f.subs.length ? '<button data-f="clr-cats">清除</button>' : ""}</div>
+        ${catHtml}
       </div>
       <div class="f-sec">
-        <div class="f-title">類別</div>
-        <div class="chips">${L_.GROUPS.filter(g => items.some(it => L_.groupOf(it) === g.id)).map(g => chip("groups", g.id, g.icon + " " + g.label, f.groups.includes(g.id))).join("")}</div>
+        <div class="f-title">地區（縣市 › 區市 › 車站）${f.prefs.length || f.munis.length || f.regions.length ? '<button data-f="clr-regions">清除</button>' : ""}</div>
+        ${regionHtml}
       </div>
       <div class="f-sec">
         <div class="f-row"><span>期待度至少</span><select data-sel="minExp">
@@ -376,9 +429,6 @@
       <details class="more" ${f.tags.length ? "open" : ""}><summary>標籤${f.tags.length ? `（已選 ${f.tags.length}）` : ""}</summary>
         <div class="chips" style="margin-top:8px">${tags.map(t => chip("tags", t, t, f.tags.includes(t))).join("")}</div>
       </details>
-      <details class="more" ${f.cats.length ? "open" : ""}><summary>細分類型${f.cats.length ? `（已選 ${f.cats.length}）` : ""}</summary>
-        <div class="chips" style="margin-top:8px">${cats.map(c => chip("cats", c, c, f.cats.includes(c))).join("")}</div>
-      </details>
       <div class="sheet-foot">
         <button class="btn" data-f="reset">全部清除</button>
         ${inSheet ? `<button class="btn primary" data-close>顯示 ${count} 筆</button>` : `<span class="small" style="align-self:center">${count} 筆符合</span>`}
@@ -391,8 +441,29 @@
       const k = b.dataset.f;
       if (k === "date") { $("#dateBtn").click(); return; }
       if (k === "today") state.date = today();
-      else if (k === "reset") { Object.assign(state.f, { must: false, groups: [], regions: [], cats: [], tags: [], verify: "", minExp: "", hideClosed: false, showArchived: false }); }
-      else if (k === "clr-regions") state.f.regions = [];
+      else if (k === "reset") { Object.assign(state.f, { must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], verify: "", minExp: "", hideClosed: false, showArchived: false }); }
+      else if (k === "clr-regions") { state.f.prefs = []; state.f.munis = []; state.f.regions = []; }
+      else if (k === "clr-cats") { state.f.groups = []; state.f.subs = []; }
+      else if (k === "subs") {
+        // 選細類時一併選它的大類；細類全取消時大類維持選取
+        toggleIn(state.f.subs, b.dataset.v);
+        if (state.f.subs.includes(b.dataset.v) && !state.f.groups.includes(b.dataset.g)) state.f.groups.push(b.dataset.g);
+      } else if (k === "prefs" || k === "munis") {
+        // 取消上層時，連同它底下已選的區市／車站一起取消
+        const v = b.dataset.v;
+        toggleIn(state.f[k], v);
+        if (!state.f[k].includes(v)) {
+          if (k === "prefs") state.f.munis = state.f.munis.filter(m => !m.startsWith(v + "／"));
+          state.f.regions = state.f.regions.filter(s => !s.startsWith(v + "／"));
+        }
+      } else if (k === "groups") {
+        // 取消大類時，連同它底下的細類一起取消
+        toggleIn(state.f.groups, b.dataset.v);
+        if (!state.f.groups.includes(b.dataset.v)) {
+          const g = L_.GROUPS.find(x => x.id === b.dataset.v);
+          state.f.subs = state.f.subs.filter(s => !g.subs.includes(s));
+        }
+      }
       else toggleIn(state.f[k], b.dataset.v);
       changed();
     };
@@ -452,6 +523,15 @@
           ${p.page ? `<a href="${esc(p.page)}" target="_blank" rel="noopener">${esc(p.credit || "來源")}</a>` : esc(p.credit || "")}${p.license ? " · " + esc(p.license) : ""}</figcaption>
       </figure>`).join("")}</div>` : "";
     const streetView = it.coord ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${it.coord[0]},${it.coord[1]}` : "";
+    // 類型：大類＋細類兩個選單（存成「大類／細類」）
+    const categoryField = item => {
+      const { main, sub } = L_.splitCategory(item.category);
+      const g = L_.GROUPS.find(x => x.label === main);
+      return `<div class="field"><label>類型</label><div class="cat-edit">
+        <select data-edit="cat-main"><option value="">（選大類）</option>${L_.GROUPS.map(x => `<option ${x.label === main ? "selected" : ""}>${x.label}</option>`).join("")}</select>
+        <select data-edit="cat-sub" ${g ? "" : "disabled"}><option value="">（選細類）</option>${(g ? g.subs : []).map(s => `<option ${s === sub ? "selected" : ""}>${s}</option>`).join("")}</select>
+      </div>${!g && item.category ? `<div class="small">目前：${esc(item.category)}（舊格式）</div>` : ""}</div>`;
+    };
     const field = (key, label, area) => `<div class="field"><label>${label}</label>${area
       ? `<textarea data-edit="${key}">${esc(it[key] || "")}</textarea>`
       : `<input data-edit="${key}" value="${esc(key === "tags" ? (it.tags || []).join("、") : (it[key] || ""))}">`}</div>`;
@@ -479,7 +559,7 @@
       </div>
       <div class="d-block">
         <div class="kv">
-          ${kv("地區", it.region)}${kv("類型", it.category)}${kv("營業時間", it.hours)}${kv("公休", it.closed)}${kv("地址", it.address)}
+          ${kv("地區", (it.region || "").split("／").join(" › "))}${kv("類型", it.category)}${kv("營業時間", it.hours)}${kv("公休", it.closed)}${kv("地址", it.address)}
         </div>
         ${streetView ? `<a class="sv-link" href="${streetView}" target="_blank" rel="noopener">👀 看街景（認門口）</a>` : ""}
         ${(it.tags || []).length ? `<div class="tags" style="margin-top:10px">${it.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
@@ -498,7 +578,7 @@
       </details>
       <details class="more"><summary>✏️ 編輯資料</summary>
         <div class="edit-grid">
-          ${field("region", "地區")}${field("category", "類型")}${field("tags", "標籤（用、分隔）")}
+          ${field("region", "地區（縣市／區市／車站）")}${categoryField(it)}${field("tags", "標籤（用、分隔）")}
           ${field("hours", "營業時間")}${field("closed", "公休日")}${field("address", "地址")}
           ${field("verify", "驗證等級")}${field("notes", "備註", true)}
         </div>
@@ -538,17 +618,26 @@
     const t = e.target; const key = t.dataset.edit; if (!key || !state.detail) return;
     const fields = {};
     if (key === "tags") fields.tags = t.value.split(/[、,，]/).map(s => s.trim()).filter(Boolean);
-    else fields[key] = t.value;
-    if (key === "category") {
-      const it = getItem(state.detail);
-      fields.is_food = L_.deriveIsFood(t.value);
-      fields.gm_tier = fields.is_food ? L_.gmTierOf(it.gm_score) : null;
-      fields.tabelog_tier = fields.is_food ? L_.tabelogTierOf(it.tabelog_score) : null;
+    else if (key === "cat-main") {
+      // 換大類：細類清空，等使用者選
+      t.blur(); window.Store.patch(state.detail, Object.assign({ category: t.value }, foodFields(t.value)));
+      toast("已儲存大類，請再選細類"); return;
+    } else if (key === "cat-sub") {
+      const main = L_.splitCategory(getItem(state.detail).category).main;
+      fields.category = t.value ? main + "／" + t.value : main;
+      Object.assign(fields, foodFields(fields.category));
     }
+    else fields[key] = t.value;
     t.blur();
     window.Store.patch(state.detail, fields);
     toast("已儲存");
   });
+  // 類型改了，餐飲判定與 GM／Tabelog 分級跟著重算
+  function foodFields(category) {
+    const it = getItem(state.detail);
+    const is_food = L_.deriveIsFood(category);
+    return { is_food, gm_tier: is_food ? L_.gmTierOf(it.gm_score) : null, tabelog_tier: is_food ? L_.tabelogTierOf(it.tabelog_score) : null };
+  }
 
   /* ---------------- 更多 ---------------- */
   let installEvt = null;
