@@ -156,6 +156,18 @@ a { color: var(--teal); }
 .f-title { font-size: 12.5px; font-weight: 800; color: var(--muted); margin-bottom: 8px; display: flex; justify-content: space-between; }
 .f-title button { border: 0; background: none; color: var(--teal); font-size: 12.5px; font-weight: 700; padding: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cat-group { margin-bottom: 10px; }
+.cat-group > .chip { font-weight: 800; }
+.cat-subs { margin: 6px 0 0 14px; padding-left: 10px; border-left: 2px solid var(--line); }
+.cat-subs .chip { font-size: 13px; min-height: 30px; padding: 4px 10px; }
+/* 區市像標籤一樣換行排列；展開中的區市獨佔一行，車站列在它底下 */
+.cat-subs:has(.region-muni) { display: flex; flex-wrap: wrap; gap: 6px; }
+.region-muni > .chip { font-size: 13px; min-height: 30px; padding: 4px 10px; }
+.region-muni:has(.region-stations) { flex-basis: 100%; }
+.region-stations { margin: 6px 0 4px 12px; padding-left: 9px; border-left: 2px dotted var(--line); }
+.region-stations .chip { font-size: 12.5px; min-height: 28px; padding: 3px 9px; }
+.cat-edit { display: flex; gap: 6px; }
+.cat-edit select { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 8px; }
 .f-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; }
 .f-row select { border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 6px 8px; }
 .switch { position: relative; width: 46px; height: 28px; flex-shrink: 0; }
