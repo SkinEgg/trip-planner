@@ -193,8 +193,10 @@
     else list.sort(recCompare);
 
     const total = tripItems().filter(x => !x.archived).length;
-    $("#listCount").textContent = `${list.length} 筆${list.length !== total ? `（共 ${total} 筆）` : ""}` +
-      (sort === "rec" ? " · 必去優先，再依期待度、網路評價" : sort === "dist" ? " · 依距離" : "");
+    const sortNote = state.sort === "dist"
+      ? (state.me ? ` · 依直線距離 <button class="link-btn" data-relocate>📍 更新位置</button>` : " · 取得位置中…（暫依推薦排序）")
+      : sort === "rec" ? " · 必去優先，再依期待度、網路評價" : "";
+    $("#listCount").innerHTML = `${list.length} 筆${list.length !== total ? `（共 ${total} 筆）` : ""}${sortNote}`;
 
     if (!list.length) { $("#list").innerHTML = `<div class="empty">目前的條件下沒有符合的地點。<br>試著放寬篩選或清除搜尋。</div>`; return; }
     if (sort === "region") {
@@ -215,9 +217,11 @@
   $("#searchInput").addEventListener("input", e => { state.q = e.target.value.trim(); renderList(); });
   $("#sortSel").addEventListener("change", e => {
     state.sort = e.target.value;
-    if (state.sort === "dist" && !state.me) { toast("先在地圖頁按 ◎ 取得目前位置"); }
     persistUi(); renderList();
+    // 選了依距離但還沒有位置：直接定位（不移動地圖）
+    if (state.sort === "dist" && !state.me) locate({ fly: false });
   });
+  $("#listCount").addEventListener("click", e => { if (e.target.closest("[data-relocate]")) locate({ fly: false }); });
 
   /* ---------------- 地圖 ---------------- */
   let map = null, markerLayer = null, meLayer = null, refMarker = null, refPopup = null, fitted = false;
@@ -318,25 +322,32 @@
     if (refMarker) { meLayer.removeLayer(refMarker); refMarker = null; }
   }
 
-  /* 我的位置：按一次取得一次，不持續追蹤 */
-  let meMarker = null, meCircle = null;
-  $("#locateBtn").addEventListener("click", () => {
+  /* 我的位置：按一次取得一次，不持續追蹤。地圖的 ◎、清單選「距離」排序、清單的「更新位置」都用這個 */
+  let meMarker = null, meCircle = null, locating = false;
+  function locate(opts) {
+    const fly = !opts || opts.fly !== false;
     if (!navigator.geolocation) { toast("這個瀏覽器不支援定位"); return; }
+    if (locating) return;
+    locating = true;
     toast("取得位置中…");
     navigator.geolocation.getCurrentPosition(pos => {
+      locating = false;
       state.me = [pos.coords.latitude, pos.coords.longitude];
       ensureMap();
       if (meMarker) { meLayer.removeLayer(meMarker); meLayer.removeLayer(meCircle); }
       meCircle = L.circle(state.me, { radius: pos.coords.accuracy, color: "#2b6cb0", weight: 1, fillOpacity: .08 }).addTo(meLayer);
       meMarker = L.marker(state.me, { icon: L.divIcon({ html: '<div class="me-dot"></div>', className: "", iconSize: [18, 18], iconAnchor: [9, 9] }), keyboard: false, zIndexOffset: 800 }).addTo(meLayer);
-      map.flyTo(state.me, Math.max(map.getZoom(), 15), { duration: 0.6 });
+      if (fly) map.flyTo(state.me, Math.max(map.getZoom(), 15), { duration: 0.6 });
       $("#locateBtn").classList.add("on");
-      toast("已取得位置；清單可依距離排序");
+      toast(state.sort === "dist" ? "已更新位置，依距離排序" : "已取得位置；清單可依距離排序");
       if (state.tab === "list") renderList();
     }, err => {
+      locating = false;
       toast(err.code === 1 ? "沒有定位權限，請在瀏覽器設定允許" : "無法取得位置，請稍後再試");
+      if (state.sort === "dist" && !state.me) { state.sort = "rec"; $("#sortSel").value = "rec"; persistUi(); renderList(); }
     }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
-  });
+  }
+  $("#locateBtn").addEventListener("click", () => locate());
 
   /* ---------------- 抽屜（篩選／詳情）與返回鍵 ---------------- */
   let overlay = null;
@@ -824,7 +835,11 @@
   /* ---------------- 啟動 ---------------- */
   $("#sortSel").value = state.sort;
   window.Store.onChange(render);
-  window.Store.init().then(() => switchTab(state.tab));
+  window.Store.init().then(() => {
+    switchTab(state.tab);
+    // 上次停在「依距離」排序：重新取得位置（位置不跨次保存）
+    if (state.sort === "dist") locate({ fly: false });
+  });
   switchTab(state.tab);
 
   if ("serviceWorker" in navigator && /^https?:/.test(location.protocol)) {
