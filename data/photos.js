@@ -489,6 +489,25 @@ window.SEED_PHOTOS = {
                              }
                          ],
     "poi_20261012_musepk":  [
-
+                                {
+                                    "url":  "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3b/Chichibu_Muse-Park1.JPG/960px-Chichibu_Muse-Park1.JPG",
+                                    "page":  "https://commons.wikimedia.org/wiki/File:Chichibu_Muse-Park1.JPG",
+                                    "role":  "rep",
+                                    "source":  "commons",
+                                    "credit":  "Ebiebi2 / Wikimedia Commons",
+                                    "license":  "CC BY-SA 3.0",
+                                    "title":  "Chichibu Muse-Park1.JPG",
+                                    "checked":  "2026-10-13"
+                                },
+                                {
+                                    "url":  "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cf/Chichibu_Muse-Park_Parthenon.JPG/960px-Chichibu_Muse-Park_Parthenon.JPG",
+                                    "page":  "https://commons.wikimedia.org/wiki/File:Chichibu_Muse-Park_Parthenon.JPG",
+                                    "role":  "ext",
+                                    "source":  "commons",
+                                    "credit":  "Ebiebi2 / Wikimedia Commons",
+                                    "license":  "CC BY-SA 3.0",
+                                    "title":  "Chichibu Muse-Park Parthenon.JPG",
+                                    "checked":  "2026-10-13"
+                                }
                             ]
 };
