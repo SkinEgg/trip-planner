@@ -514,11 +514,12 @@
       { ok: "✅ 已驗證", partial: "🟡 部分驗證", warn: "🔴 未驗證／有疑慮", none: "" }[L_.verifyLevel(it.verify)]
     ].filter(Boolean).join(" ");
     const kv = (k, v) => v ? `<div class="k">${k}</div><div>${esc(v)}</div>` : "";
-    // 圖片：直接從來源網站讀取（不複製檔案），讀不到就整張隱藏
-    const photos = (Array.isArray(it.photos) ? it.photos : []).filter(p => p && p.url);
+    // 圖片：網址型直接從來源網站讀取（不複製檔案）；storage 型是使用者提供、放在 Supabase 私人空間的圖，
+    // 登入後才取得臨時網址。讀不到就整張隱藏
+    const photos = (Array.isArray(it.photos) ? it.photos : []).filter(p => p && (p.url || p.storage));
     const photoHtml = photos.length ? `<div class="photos">${photos.map(p => `
       <figure class="photo">
-        <img src="${esc(p.url)}" alt="${esc(nameOf(it))}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('figure').remove()">
+        <img ${p.url ? `src="${esc(p.url)}"` : `data-storage="${esc(p.storage)}"`} alt="${esc(nameOf(it))}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('figure').remove()">
         <figcaption><span class="ph-role">${p.role === "ext" ? "外觀" : "代表"}</span>
           ${p.page ? `<a href="${esc(p.page)}" target="_blank" rel="noopener">${esc(p.credit || "來源")}</a>` : esc(p.credit || "")}${p.license ? " · " + esc(p.license) : ""}</figcaption>
       </figure>`).join("")}</div>` : "";
@@ -589,6 +590,12 @@
       </div>`;
     sh.querySelectorAll("details").forEach((d, i) => { if (openState[i]) d.open = true; });
     sh.scrollTop = st;
+    // 私人空間的圖：向 Supabase 取臨時網址後再顯示；取不到（未登入、本機模式）就隱藏
+    sh.querySelectorAll("img[data-storage]").forEach(img => {
+      window.Store.photoUrl(img.dataset.storage).then(u => {
+        if (u) img.src = u; else img.closest("figure") && img.closest("figure").remove();
+      });
+    });
   }
   $("#detailSheet").addEventListener("click", e => {
     const id = state.detail; const it = id && getItem(id);
