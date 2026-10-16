@@ -18,6 +18,7 @@
   let listeners = [];
   let status = { mode: "local", state: "ok", text: "" };
   let client = null, user = null, channel = null, flushing = false;
+  const photoCache = new Map();   // 私人圖片的臨時網址（path → { url, exp }）
 
   function emit() { listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } }); }
   function setStatus(state, text) { status = Object.assign({}, status, { state, text }); emit(); }
@@ -210,7 +211,18 @@
       if (error) throw error;
     },
     async signOut() { if (client) await client.auth.signOut(); },
-    refresh() { if (client && user) return refresh().then(flush); }
+    refresh() { if (client && user) return refresh().then(flush); },
+
+    /* 私人圖片空間（Supabase Storage「photos」，不公開）：取得 6 小時有效的臨時網址，同一張圖重複使用 */
+    async photoUrl(path) {
+      if (!client || !user || !path) return null;
+      const hit = photoCache.get(path);
+      if (hit && hit.exp > Date.now()) return hit.url;
+      const { data, error } = await client.storage.from("photos").createSignedUrl(path, 6 * 3600);
+      if (error || !data) { console.warn(error); return null; }
+      photoCache.set(path, { url: data.signedUrl, exp: Date.now() + 5.5 * 3600 * 1000 });
+      return data.signedUrl;
+    }
   };
   window.Store = Store;
 })();
