@@ -24,7 +24,7 @@
     sel: null,          // 地圖上選取中的地點
     detail: null,       // 詳情開啟中的地點
     me: null,           // 我的位置 [lat, lng]
-    f: Object.assign({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], verify: "", minExp: "", hideClosed: false, showArchived: false }, saved.v === 2 ? saved.f : {})
+    f: Object.assign({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", hideClosed: false, showArchived: false }, saved.v === 2 ? saved.f : {})
   };
   if (!CFG.trips.some(t => t.id === state.trip)) state.trip = CFG.defaultTrip;
   // v: 2 = 地區改三層後的篩選格式；舊版存的篩選條件不沿用
@@ -82,11 +82,12 @@
     if (!regionPasses(it)) return false;
     if (!categoryPasses(it)) return false;
     if (f.tags.length && !(it.tags || []).some(t => f.tags.includes(t))) return false;
+    if (f.goals.length && !L_.goalList(it).some(g => f.goals.includes(g.name))) return false;
     if (f.verify && L_.verifyLevel(it.verify) !== f.verify) return false;
-    if (f.minExp && !(typeof it.expectation === "number" && it.expectation >= +f.minExp)) return false;
+    if (f.minExp && !(L_.expTotal(it) != null && L_.expTotal(it) >= +f.minExp)) return false;
     if (f.hideClosed) { const c = L_.closedOn(it, state.date).level; if (c === "closed" || c === "gone") return false; }
     if (state.q) {
-      const hay = L_.norm([it.name, it.name_clean, it.region, it.category, it.address, it.notes, (it.tags || []).join(" ")].join(" "));
+      const hay = L_.norm([it.name, it.name_clean, it.region, it.category, it.address, it.notes, (it.tags || []).join(" "), L_.goalList(it).map(g => g.name).join(" ")].join(" "));
       if (!hay.includes(L_.norm(state.q))) return false;
     }
     return true;
@@ -94,7 +95,7 @@
   function filtered() { return tripItems().filter(passes); }
   function activeFilterCount() {
     const f = state.f;
-    return f.prefs.length + f.munis.length + f.regions.length + f.subs.length + f.tags.length + (f.verify ? 1 : 0) + (f.minExp ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
+    return f.prefs.length + f.munis.length + f.regions.length + f.subs.length + f.tags.length + f.goals.length + (f.verify ? 1 : 0) + (f.minExp ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
   }
 
   /* 分數顯示：餐飲＝總分（顏色依目前篩選結果中的相對排名，前／中／後三分之一）；非餐飲＝期待度 */
@@ -110,12 +111,12 @@
       const t = L_.totalScore(it);
       return { num: t == null ? "—" : (Math.round(t * 10) / 10), label: "總分", tier: t == null ? "low" : (ranks[it.id] || "low") };
     }
-    const e = it.expectation;
+    const e = L_.expTotal(it);
     return { num: e == null ? "—" : e, label: "期待", tier: e >= 4 ? "good" : e === 3 ? "mid" : "low" };
   }
   function recCompare(a, b) {
     if (!!b.must_go !== !!a.must_go) return b.must_go ? 1 : -1;
-    const ea = a.expectation == null ? -1 : a.expectation, eb = b.expectation == null ? -1 : b.expectation;
+    const ea = L_.expTotal(a) ?? -1, eb = L_.expTotal(b) ?? -1;
     if (eb !== ea) return eb - ea;
     const ca = L_.comboScore(a), cb = L_.comboScore(b);
     if ((cb == null ? -1 : cb) !== (ca == null ? -1 : ca)) return (cb == null ? -1 : cb) - (ca == null ? -1 : ca);
@@ -178,6 +179,7 @@
       <div class="card-main">
         <div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
         <div class="card-sub">${subs.join("")}</div>
+        ${L_.goalList(it).length ? `<div class="card-goals">🎯 ${L_.goalList(it).map(g => esc(g.name)).join("、")}</div>` : ""}
       </div>
       <div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>
       ${withGo ? `<a class="go-btn" href="${esc(it.maps_url || L_.mapsUrl(it))}" target="_blank" rel="noopener" title="在 Google Maps 開啟" data-go>🧭</a>` : ""}
@@ -249,7 +251,7 @@
       return `<div class="pin${sel}${dim}" style="background:${color}">${s.num === "—" ? "?" : Math.round(s.num)}${must}</div>`;
     }
     if (L_.isGinkgo(it)) return `<div class="pin ginkgo${sel}${dim}">${GINKGO_SVG}${must}</div>`;
-    const e = it.expectation;
+    const e = L_.expTotal(it);
     const bg = e >= 4 ? "#2f8f55" : e === 3 ? "#c08a1e" : "#8a8072";
     return `<div class="pin sq${sel}${dim}" style="background:${bg}">${L_.typeIcon(it)}${must}</div>`;
   }
@@ -376,6 +378,10 @@
     const f = state.f;
     const uniq = arr => [...new Set(arr)].filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-Hant"));
     const tags = uniq(items.flatMap(it => it.tags || []));
+    // 目標：依地點數多→少，標上筆數（任一個目標符合就列出）
+    const goalCount = {};
+    items.filter(it => !it.archived || f.showArchived).forEach(it => L_.goalList(it).forEach(g => { goalCount[g.name] = (goalCount[g.name] || 0) + 1; }));
+    const goals = Object.keys(goalCount).sort((a, b) => goalCount[b] - goalCount[a] || a.localeCompare(b, "zh-Hant"));
     const chip = (kind, v, label, on, extra) => `<button class="chip ${on ? "on" : ""}" data-f="${kind}" data-v="${esc(v)}" ${extra || ""}>${esc(label)}</button>`;
     // 地區三層：都道府縣 → 選了才展開區市 → 選了區市才展開車站；都依地點數多→少排列，標上筆數
     const visible = items.filter(it => !it.archived || f.showArchived);
@@ -418,6 +424,10 @@
         ${sw("must", "只看必去")}
         ${sw("showArchived", "顯示已封存")}
       </div>
+      ${goals.length ? `<div class="f-sec">
+        <div class="f-title">🎯 目標${f.goals.length ? '<button data-f="clr-goals">清除</button>' : ""}</div>
+        <div class="chips">${goals.map(g => chip("goals", g, `${g} ${goalCount[g]}`, f.goals.includes(g))).join("")}</div>
+      </div>` : ""}
       <div class="f-sec">
         <div class="f-title">類型${f.groups.length || f.subs.length ? '<button data-f="clr-cats">清除</button>' : ""}</div>
         ${catHtml}
@@ -452,9 +462,10 @@
       const k = b.dataset.f;
       if (k === "date") { $("#dateBtn").click(); return; }
       if (k === "today") state.date = today();
-      else if (k === "reset") { Object.assign(state.f, { must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], verify: "", minExp: "", hideClosed: false, showArchived: false }); }
+      else if (k === "reset") { Object.assign(state.f, { must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", hideClosed: false, showArchived: false }); }
       else if (k === "clr-regions") { state.f.prefs = []; state.f.munis = []; state.f.regions = []; }
       else if (k === "clr-cats") { state.f.groups = []; state.f.subs = []; }
+      else if (k === "clr-goals") state.f.goals = [];
       else if (k === "subs") {
         // 選細類時一併選它的大類；細類全取消時大類維持選取
         toggleIn(state.f.subs, b.dataset.v);
@@ -516,8 +527,24 @@
     const gm = it.gm_score != null ? `Google ${it.gm_score}` : null;
     const tb = it.tabelog_score != null ? `Tabelog ${it.tabelog_score}` : null;
     const scoreLine = it.is_food
-      ? `<b style="font-size:20px">${total ?? "—"}</b> 總分 ＝ 期待度 ${it.expectation ?? "未填"}${gm ? " ＋ " + gm : ""}${tb ? " ＋ " + tb : ""}`
+      ? `<b style="font-size:20px">${total ?? "—"}</b> 總分 ＝ 期待度 ${L_.expTotal(it) ?? "未填"}${gm ? " ＋ " + gm : ""}${tb ? " ＋ " + tb : ""}`
       : `非餐飲類，看期待度${gm ? `（參考：${gm}）` : ""}`;
+    // 目標：沒分數的＝含在原本期待度裡；有分數的＝追加目標，加在原本期待度上
+    const goals = L_.goalList(it);
+    const baseGoals = goals.filter(g => typeof g.exp !== "number").map(g => g.name);
+    const extraGoals = goals.filter(g => typeof g.exp === "number");
+    const expSum = extraGoals.length
+      ? `<div class="exp-sum">期待度合計 <b>${L_.expTotal(it)}</b> ＝ 原本 ${it.expectation ?? "未填"}${baseGoals.length ? `（${esc(baseGoals.join("、"))}）` : ""}${extraGoals.map(g => ` ＋ ${esc(g.name)} ${g.exp}`).join("")}</div>`
+      : "";
+    const goalRows = goals.map(g => `<div class="goal-row">
+        <span class="goal">${esc(g.name)}</span>
+        <select data-goal-exp="${esc(g.name)}" aria-label="${esc(g.name)} 的期待度">
+          <option value="" ${typeof g.exp === "number" ? "" : "selected"}>含在原本期待度</option>
+          ${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${g.exp === n ? "selected" : ""}>＋${n}</option>`).join("")}
+        </select>
+        <button class="goal-del" data-goal-del="${esc(g.name)}" aria-label="移除目標 ${esc(g.name)}">✕</button>
+      </div>`).join("");
+    const goalOptions = [...new Set(tripItems().flatMap(x => L_.goalList(x).map(g => g.name)))].filter(n => !goals.some(g => g.name === n));
     const badges = [
       it.must_go ? '<span class="badge b-must">★ 必去</span>' : "",
       it.archived ? '<span class="badge b-arch">已封存</span>' : "",
@@ -561,9 +588,17 @@
         ${it.coord ? '<button class="btn" data-act="onmap">📍 地圖</button>' : ""}
       </div>
       <div class="d-block">
-        <div class="d-label">期待度</div>
+        <div class="d-label">${extraGoals.length ? "原本期待度" : "期待度"}</div>
         <div class="exp-seg">${[1, 2, 3, 4, 5].map(n => `<button data-exp="${n}" class="${it.expectation === n ? "on" : ""}">${n}</button>`).join("")}
           <button class="clear" data-exp="">清除</button></div>
+        ${expSum}
+      </div>
+      <div class="d-block">
+        <div class="d-label">🎯 目標</div>
+        ${goalRows || '<div class="small" style="margin-bottom:8px">（未設定）</div>'}
+        <input class="goal-add" data-edit="goal-add" list="goalOptions" placeholder="＋ 新增目標（可用、分隔多個）">
+        <datalist id="goalOptions">${goalOptions.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+        <div class="small">新目標選「＋分數」就會加到期待度合計；選「含在原本期待度」則不加分。</div>
       </div>
       <div class="d-block">
         <div class="d-label">分數</div>
@@ -619,6 +654,12 @@
       toast(v == null ? "已清除期待度" : "期待度 " + v);
       return;
     }
+    const gd = e.target.closest("[data-goal-del]");
+    if (gd) {
+      window.Store.patch(id, { goals: L_.goalList(it).filter(g => g.name !== gd.dataset.goalDel) });
+      toast("已移除目標");
+      return;
+    }
     const a = e.target.closest("[data-act]"); if (!a) return;
     if (a.dataset.act === "must") window.Store.patch(id, { must_go: !it.must_go });
     if (a.dataset.act === "onmap") { closeOverlay(); switchTab("map"); setTimeout(() => selectOnMap(id, true), 120); }
@@ -633,9 +674,30 @@
     }
   });
   $("#detailSheet").addEventListener("change", e => {
-    const t = e.target; const key = t.dataset.edit; if (!key || !state.detail) return;
+    const t = e.target;
+    if (t.dataset.goalExp != null && state.detail) {
+      const v = t.value === "" ? null : +t.value;
+      const goals = L_.goalList(getItem(state.detail)).map(g => {
+        if (g.name !== t.dataset.goalExp) return g;
+        const o = { name: g.name }; if (v != null) o.exp = v; return o;
+      });
+      t.blur();
+      window.Store.patch(state.detail, { goals });
+      toast("期待度合計 " + (L_.expTotal(getItem(state.detail)) ?? "未填"));
+      return;
+    }
+    const key = t.dataset.edit; if (!key || !state.detail) return;
     const fields = {};
     if (key === "tags") fields.tags = t.value.split(/[、,，]/).map(s => s.trim()).filter(Boolean);
+    else if (key === "goal-add") {
+      const cur = L_.goalList(getItem(state.detail));
+      const add = [...new Set(t.value.split(/[、,，]/).map(s => s.trim()))].filter(s => s && !cur.some(g => g.name === s));
+      t.value = ""; t.blur();
+      if (!add.length) return;
+      window.Store.patch(state.detail, { goals: cur.concat(add.map(name => ({ name }))) });
+      toast("已新增目標；選「＋分數」就會加到期待度");
+      return;
+    }
     else if (key === "cat-main") {
       // 換大類：細類清空，等使用者選
       t.blur(); window.Store.patch(state.detail, Object.assign({ category: t.value }, foodFields(t.value)));
@@ -730,7 +792,7 @@
     if (!name) return;
     const it = {
       id: L_.newId(), trip: state.trip, name, name_clean: name, region: "未分類待確認", region_note: null,
-      category: "", is_food: false, tags: [], expectation: null, must_go: false,
+      category: "", is_food: false, tags: [], goals: [], expectation: null, must_go: false,
       gm_score: null, gm_note: "", gm_tier: null, tabelog_score: null, tabelog_note: "", tabelog_tier: null,
       hours: "", closed: "", verify: "🔴未驗證（新增，尚未查證）", status: "候選（剛新增）", confidence: "",
       address: "", notes: "", source: "使用者手動新增", coord: null, archived: false
@@ -784,7 +846,7 @@
           });
           if (Object.keys(fields).length) updates.push([ex.id, fields]);
         } else {
-          adds.push(Object.assign({ id: L_.newId(), trip: state.trip, archived: false, must_go: false, expectation: null, tags: [] }, inc));
+          adds.push(Object.assign({ id: L_.newId(), trip: state.trip, archived: false, must_go: false, expectation: null, tags: [], goals: [] }, inc));
         }
       });
       if (!updates.length && !adds.length) { alert("資料都一樣，沒有需要更新的地方。"); return; }
