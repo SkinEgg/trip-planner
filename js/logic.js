@@ -32,9 +32,23 @@
     if (!vals.length) return null;
     return round2(vals.reduce((a, b) => a + b, 0));
   }
+  /* 目標與期待度合計（使用者 2026-10-19 決定）：原本的期待度（expectation）不動；
+     之後追加的目標可以各自有期待度（goals[].exp），加在原本的上面。
+     例：飛木稲荷 欣賞銀杏（原本 4）＋ 蕾絲銀杏御守 3 ＝ 7。沒有分數的目標＝已含在原本期待度裡 */
+  function goalList(item) {
+    return (Array.isArray(item.goals) ? item.goals : [])
+      .map(g => typeof g === "string" ? { name: g } : g)
+      .filter(g => g && g.name);
+  }
+  function expTotal(item) {
+    const base = typeof item.expectation === "number" ? item.expectation : null;
+    const extra = goalList(item).filter(g => typeof g.exp === "number");
+    if (base == null && !extra.length) return null;
+    return (base || 0) + extra.reduce((a, g) => a + g.exp, 0);
+  }
   function totalScore(item) {
     const combo = comboScore(item);
-    const exp = typeof item.expectation === "number" ? item.expectation : null;
+    const exp = expTotal(item);
     if (combo == null && exp == null) return null;
     return round2((combo || 0) + (exp || 0));
   }
@@ -211,7 +225,7 @@
   }
 
   window.Logic = {
-    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore,
+    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore, goalList, expTotal,
     GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, regionGroup, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl

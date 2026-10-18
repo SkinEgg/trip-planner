@@ -25,6 +25,8 @@
   function withDefaults(it) {
     if (!it.trip) it.trip = CFG.defaultTrip;
     if (!Array.isArray(it.tags)) it.tags = [];
+    // 目標：這個地點要去做什麼（可多個；沒提出就空著），格式 [{ name, exp? }]
+    it.goals = window.Logic.goalList(it);
     // 圖片：資料本身沒有時，用 data/photos.js 的整理結果（雲端匯入後以雲端為準）
     const ph = window.SEED_PHOTOS && window.SEED_PHOTOS[it.id];
     if (!Array.isArray(it.photos) && ph) it.photos = ph;
