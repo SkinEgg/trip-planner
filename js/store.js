@@ -1,52 +1,95 @@
 /* 資料層：本機模式／雲端模式（Supabase）共用同一組介面。
-   - 本機模式：初始資料來自 data/seed.js，你的修改存在這個瀏覽器（localStorage）。
-   - 雲端模式：資料在 Supabase 的 pois 資料表；畫面先用上次的快取，連上後即時同步。
-   所有修改都是「欄位層級」：只送出改了的欄位，寫入時比對版本，不會蓋掉別人（或 Claude）同時改的其他欄位。
+   資料分三種（2026-10-19 起）：
+   - 地點資料庫（pois）：查證過的地點資料，所有旅程共用。下次去同一個地方直接沿用。
+   - 旅程（trips）：用「年月＋目的地」區分，例如 2026/11 東京。
+   - 旅程清單（trip_pois）：某個地點在某次旅程裡的設定——期待度、目標、必去／已預約、封存、狀態。
+     這些只屬於那次旅程，不寫進地點資料庫。
+   畫面拿到的 items() 是「目前旅程」的清單：地點資料＋這次旅程的設定合在一起。
+   修改一樣是「欄位層級」：只送出改了的欄位，寫入時比對版本，不會蓋掉別人（或 Claude）同時改的其他欄位。
    網路斷掉時修改先排隊（存在本機），恢復連線後自動補上傳。 */
 (function () {
   "use strict";
   const CFG = window.APP_CONFIG || {};
   const LS = {
     get(k, fallback) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 空間不足或被封鎖時略過 */ } }
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 空間不足或被封鎖時略過 */ } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { } }
   };
-  const K_LOCAL = "tripapp.local.v1";     // 本機模式：{ overrides: {id: fields}, added: [item] }
-  const K_CACHE = "tripapp.cache.v1";     // 雲端模式：上次同步的完整資料
-  const K_PENDING = "tripapp.pending.v1"; // 雲端模式：尚未上傳的修改 {id: {fields, isNew, trip}}
+  // 只屬於某次旅程的欄位：存在旅程清單，不進地點資料庫
+  const TRIP_FIELDS = ["expectation", "goals", "must_go", "archived", "archive_date", "archive_reason", "status"];
+  const isTripField = k => TRIP_FIELDS.includes(k);
 
-  let items = [];
+  const K_LOCAL = "tripapp.local.v2";     // 本機模式：整份資料 { places, plans, trips }
+  const K_CACHE = "tripapp.cache.v2";     // 雲端模式：上次同步的資料 { places, plans, trips }
+  const K_PENDING = "tripapp.pending.v2"; // 雲端模式：尚未上傳的修改 { key: op }
+  const K_PENDING_OLD = "tripapp.pending.v1";
+
+  let places = new Map();   // id → 地點資料（含 _v 版本）
+  let plans = new Map();    // "旅程|地點" → { trip, poi, data, _v }
+  let trips = [];           // [{ id, name, dest, ym, center, zoom }]
+  let curTrip = CFG.defaultTrip;
+  let items = [];           // 目前旅程的清單（合併後）
   let listeners = [];
   let status = { mode: "local", state: "ok", text: "" };
   let client = null, user = null, channel = null, flushing = false;
   const photoCache = new Map();   // 私人圖片的臨時網址（path → { url, exp }）
 
-  function emit() { listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } }); }
+  const planKey = (trip, poi) => trip + "|" + poi;
+  const byYm = (a, b) => (a.ym || "").localeCompare(b.ym || "");
+  function emit() { rebuild(); listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } }); }
   function setStatus(state, text) { status = Object.assign({}, status, { state, text }); emit(); }
+  function split(fields) {
+    const place = {}, plan = {};
+    Object.keys(fields).forEach(k => {
+      if (k === "id" || k === "trip" || k === "_v") return;
+      (isTripField(k) ? plan : place)[k] = fields[k];
+    });
+    return { place, plan };
+  }
   function withDefaults(it) {
-    if (!it.trip) it.trip = CFG.defaultTrip;
     if (!Array.isArray(it.tags)) it.tags = [];
-    // 目標：這個地點要去做什麼（可多個；沒提出就空著），格式 [{ name, exp? }]
+    // 目標：這個地點這次要去做什麼（可多個；沒提出就空著），格式 [{ name, exp? }]
     it.goals = window.Logic.goalList(it);
-    // 圖片：資料本身沒有時，用 data/photos.js 的整理結果（雲端匯入後以雲端為準）
+    // 圖片：資料本身沒有時，用 data/photos.js 的整理結果
     const ph = window.SEED_PHOTOS && window.SEED_PHOTOS[it.id];
     if (!Array.isArray(it.photos) && ph) it.photos = ph;
     return it;
   }
+  // 目前旅程的清單＝地點資料（去掉舊的旅程欄位）＋這次旅程的設定
+  function rebuild() {
+    const out = [];
+    plans.forEach(p => {
+      if (p.trip !== curTrip) return;
+      const place = places.get(p.poi);
+      if (!place) return;
+      const o = Object.assign({}, place);
+      TRIP_FIELDS.forEach(k => delete o[k]);
+      Object.assign(o, p.data, { id: p.poi, trip: p.trip, _v: place._v });
+      out.push(withDefaults(o));
+    });
+    items = out;
+  }
   function pendingCount() { return Object.keys(LS.get(K_PENDING, {})).length; }
 
-  /* ---------------- 本機模式 ---------------- */
+  /* ---------------- 本機模式（開發測試用） ---------------- */
   function loadLocal() {
-    const st = LS.get(K_LOCAL, { overrides: {}, added: [] });
-    const seed = (window.SEED_POIS || []).map(x => withDefaults(Object.assign({}, x)));
-    const all = seed.concat((st.added || []).map(x => withDefaults(Object.assign({}, x))));
-    items = all.map(it => Object.assign(it, st.overrides[it.id] || {}));
+    let db = LS.get(K_LOCAL, null);
+    if (!db) {
+      // 第一次：從 data/seed.js 建立（seed 是舊格式，地點與旅程欄位混在一起）
+      db = { places: [], plans: [], trips: (CFG.trips || []).map(t => Object.assign({}, t)) };
+      (window.SEED_POIS || []).forEach(x => {
+        const { place, plan } = split(x);
+        db.places.push(Object.assign({ id: x.id }, place));
+        db.plans.push({ trip: x.trip || CFG.defaultTrip, poi: x.id, data: plan });
+      });
+    }
+    places = new Map(db.places.map(p => [p.id, p]));
+    plans = new Map(db.plans.map(p => [planKey(p.trip, p.poi), p]));
+    trips = db.trips || [];
     status = { mode: "local", state: "ok", text: "💾 本機模式" };
   }
-  function saveLocalPatch(id, fields, newItem) {
-    const st = LS.get(K_LOCAL, { overrides: {}, added: [] });
-    if (newItem) st.added.push(newItem);
-    else st.overrides[id] = Object.assign(st.overrides[id] || {}, fields);
-    LS.set(K_LOCAL, st);
+  function saveLocal() {
+    LS.set(K_LOCAL, { places: [...places.values()], plans: [...plans.values()], trips });
   }
 
   /* ---------------- 雲端模式 ---------------- */
@@ -57,20 +100,56 @@
       document.head.appendChild(s);
     });
   }
-  function rowToItem(r) { return withDefaults(Object.assign({}, r.data, { id: r.id, trip: r.trip, _v: r.version })); }
-  function applyPendingOnTop(list) {
+  const placeFromRow = r => Object.assign({}, r.data, { id: r.id, _v: r.version });
+  const planFromRow = r => ({ trip: r.trip_id, poi: r.poi_id, data: r.data || {}, _v: r.version });
+  const tripFromRow = r => ({ id: r.id, name: r.name, dest: r.dest, ym: r.ym, center: r.center, zoom: r.zoom });
+
+  // 排隊中的修改疊在伺服器資料上，畫面才不會「跳回去」
+  function applyPending() {
     const pend = LS.get(K_PENDING, {});
-    const byId = new Map(list.map(x => [x.id, x]));
-    Object.entries(pend).forEach(([id, p]) => {
-      if (byId.has(id)) Object.assign(byId.get(id), p.fields);
-      else if (p.isNew) list.push(withDefaults(Object.assign({ id, trip: p.trip }, p.fields)));
+    Object.values(pend).forEach(op => {
+      if (op.kind === "trip") { if (!trips.some(t => t.id === op.id)) { trips.push(Object.assign({ id: op.id }, op.fields)); trips.sort(byYm); } }
+      if (op.kind === "place") {
+        const cur = places.get(op.id);
+        if (cur) Object.assign(cur, op.fields); else if (op.isNew) places.set(op.id, Object.assign({ id: op.id }, op.fields));
+      }
+      if (op.kind === "plan") {
+        const k = planKey(op.trip, op.poi);
+        if (op.del) { plans.delete(k); return; }
+        const cur = plans.get(k);
+        if (cur) Object.assign(cur.data, op.fields); else if (op.isNew) plans.set(k, { trip: op.trip, poi: op.poi, data: Object.assign({}, op.fields) });
+      }
     });
-    return list;
+  }
+  function saveCache() {
+    LS.set(K_CACHE, { places: [...places.values()], plans: [...plans.values()], trips });
+  }
+  function loadCache() {
+    const c = LS.get(K_CACHE, null);
+    if (!c) return;
+    places = new Map((c.places || []).map(p => [p.id, p]));
+    plans = new Map((c.plans || []).map(p => [planKey(p.trip, p.poi), p]));
+    trips = c.trips || [];
+  }
+  // 舊版的待上傳修改（地點與旅程欄位混在一起）轉成新格式
+  function migrateOldPending() {
+    const old = LS.get(K_PENDING_OLD, null);
+    if (!old) return;
+    const pend = LS.get(K_PENDING, {});
+    Object.entries(old).forEach(([id, p]) => {
+      const { place, plan } = split(p.fields || {});
+      const trip = p.trip || CFG.defaultTrip;
+      if (Object.keys(place).length || p.isNew) pend["p:" + id] = { kind: "place", id, trip, fields: place, isNew: !!p.isNew };
+      if (Object.keys(plan).length || p.isNew) pend["t:" + planKey(trip, id)] = { kind: "plan", trip, poi: id, fields: plan, isNew: !!p.isNew };
+    });
+    LS.set(K_PENDING, pend);
+    LS.del(K_PENDING_OLD);
   }
 
   async function initCloud() {
     status = { mode: "cloud", state: "loading", text: "⏳ 連線中…" };
-    items = applyPendingOnTop((LS.get(K_CACHE, []) || []).map(withDefaults));
+    migrateOldPending();
+    loadCache(); applyPending();
     emit();
     try {
       if (!window.supabase) await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js");
@@ -96,13 +175,21 @@
 
   async function refresh() {
     setStatus("loading", "⏳ 同步中…");
-    const { data, error } = await client.from("pois").select("id,trip,data,version").limit(5000);
+    const [rp, rt, rr] = await Promise.all([
+      client.from("pois").select("id,data,version").limit(10000),
+      client.from("trip_pois").select("trip_id,poi_id,data,version").limit(20000),
+      client.from("trips").select("id,name,dest,ym,center,zoom").order("ym")
+    ]);
+    const error = rp.error || rt.error || rr.error;
     if (error) {
       setStatus(navigator.onLine ? "error" : "offline", navigator.onLine ? "⚠️ 讀取失敗" : "📴 離線（顯示上次資料）");
       console.warn(error); return;
     }
-    LS.set(K_CACHE, data.map(rowToItem));
-    items = applyPendingOnTop(data.map(rowToItem));
+    places = new Map(rp.data.map(r => [r.id, placeFromRow(r)]));
+    plans = new Map(rt.data.map(r => { const p = planFromRow(r); return [planKey(p.trip, p.poi), p]; }));
+    trips = rr.data.map(tripFromRow);
+    saveCache();
+    applyPending();
     updateSyncedStatus();
   }
   function updateSyncedStatus() {
@@ -113,50 +200,85 @@
   function startSync() {
     refresh().then(flush);
     if (channel) client.removeChannel(channel);
-    channel = client.channel("pois-changes")
+    const pend = () => LS.get(K_PENDING, {});
+    channel = client.channel("trip-data")
       .on("postgres_changes", { event: "*", schema: "public", table: "pois" }, payload => {
-        const r = payload.new;
-        if (!r || !r.id) return;
-        const it = rowToItem(r);
-        const pend = LS.get(K_PENDING, {})[r.id];
-        if (pend) Object.assign(it, pend.fields);
-        const i = items.findIndex(x => x.id === r.id);
-        if (i >= 0) items[i] = it; else items.push(it);
-        LS.set(K_CACHE, items.map(x => Object.assign({}, x)));
-        emit();
+        const r = payload.new; if (!r || !r.id) return;
+        const p = placeFromRow(r);
+        const op = pend()["p:" + r.id]; if (op) Object.assign(p, op.fields);
+        places.set(r.id, p); saveCache(); emit();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "trip_pois" }, payload => {
+        if (payload.eventType === "DELETE") {
+          const o = payload.old || {}; if (o.trip_id) { plans.delete(planKey(o.trip_id, o.poi_id)); saveCache(); emit(); }
+          return;
+        }
+        const r = payload.new; if (!r || !r.trip_id) return;
+        const p = planFromRow(r);
+        const op = pend()["t:" + planKey(p.trip, p.poi)];
+        if (op && op.del) return;
+        if (op) Object.assign(p.data, op.fields);
+        plans.set(planKey(p.trip, p.poi), p); saveCache(); emit();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "trips" }, payload => {
+        const r = payload.new; if (!r || !r.id) return;
+        const t = tripFromRow(r);
+        const i = trips.findIndex(x => x.id === t.id);
+        if (i >= 0) trips[i] = t; else trips.push(t);
+        trips.sort(byYm);
+        saveCache(); emit();
       })
       .subscribe();
   }
   function stopSync() { if (channel) { client.removeChannel(channel); channel = null; } }
 
-  /* 把排隊中的修改一筆一筆送上去：讀最新版本 → 合併我改的欄位 → 帶版本號寫回；版本不符就重試 */
+  /* 把排隊中的修改一筆一筆送上去：讀最新版本 → 合併我改的欄位 → 帶版本號寫回；版本不符就重試。
+     順序：旅程 → 地點 → 旅程清單（清單要參照前兩者）→ 刪除 */
+  const ORDER = op => op.kind === "trip" ? 0 : op.kind === "place" ? 1 : op.del ? 3 : 2;
+  async function sendOne(op) {
+    if (op.kind === "trip") {
+      const { error } = await client.from("trips").insert(Object.assign({ id: op.id }, op.fields));
+      if (error && error.code !== "23505") throw error;
+      return true;
+    }
+    if (op.kind === "plan" && op.del) {
+      const { error } = await client.from("trip_pois").delete().eq("trip_id", op.trip).eq("poi_id", op.poi);
+      if (error) throw error;
+      return true;
+    }
+    const table = op.kind === "place" ? "pois" : "trip_pois";
+    const match = q => op.kind === "place" ? q.eq("id", op.id) : q.eq("trip_id", op.trip).eq("poi_id", op.poi);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { data: row, error: e1 } = await match(client.from(table).select("data,version")).maybeSingle();
+      if (e1) throw e1;
+      if (!row) {
+        const ins = op.kind === "place"
+          ? { id: op.id, trip: op.trip || curTrip, data: Object.assign({ id: op.id }, op.fields) }
+          : { trip_id: op.trip, poi_id: op.poi, data: op.fields };
+        const { error: e2 } = await client.from(table).insert(ins);
+        if (e2 && e2.code !== "23505") throw e2;   // 23505 = 已存在（別處剛建立），下一輪改用更新
+        if (!e2) return true;
+        continue;
+      }
+      const merged = Object.assign({}, row.data, op.fields);
+      const { data: upd, error: e3 } = await match(client.from(table).update({ data: merged })).eq("version", row.version).select("version");
+      if (e3) throw e3;
+      if (upd && upd.length > 0) return true;   // 0 筆 = 剛好有人改過，重讀再合併一次
+    }
+    return false;
+  }
   async function flush() {
     if (!client || !user || flushing) return;
     flushing = true;
     try {
       const pend = LS.get(K_PENDING, {});
-      for (const id of Object.keys(pend)) {
-        const p = pend[id];
-        let done = false;
-        for (let attempt = 0; attempt < 4 && !done; attempt++) {
-          const { data: row, error: e1 } = await client.from("pois").select("data,version").eq("id", id).maybeSingle();
-          if (e1) throw e1;
-          if (!row) {
-            const { error: e2 } = await client.from("pois").insert({ id, trip: p.trip || CFG.defaultTrip, data: Object.assign({ id }, p.fields) });
-            if (e2 && e2.code !== "23505") throw e2;   // 23505 = 已存在（別處剛建立），下一輪改用更新
-            done = !e2;
-            continue;
-          }
-          const merged = Object.assign({}, row.data, p.fields);
-          const { data: upd, error: e3 } = await client.from("pois").update({ data: merged })
-            .eq("id", id).eq("version", row.version).select("version");
-          if (e3) throw e3;
-          done = upd && upd.length > 0;   // 0 筆 = 剛好有人改過，重讀再合併一次
-        }
-        if (done) {
+      const keys = Object.keys(pend).sort((a, b) => ORDER(pend[a]) - ORDER(pend[b]));
+      for (const key of keys) {
+        const op = pend[key];
+        if (await sendOne(op)) {
           const cur = LS.get(K_PENDING, {});
           // 上傳期間若又有新修改，保留新的那部分
-          if (cur[id] && JSON.stringify(cur[id].fields) === JSON.stringify(p.fields)) delete cur[id];
+          if (cur[key] && JSON.stringify(cur[key]) === JSON.stringify(op)) delete cur[key];
           LS.set(K_PENDING, cur);
         }
       }
@@ -167,45 +289,104 @@
         (navigator.onLine ? "⚠️ 上傳失敗，" : "📴 離線，") + pendingCount() + " 筆待上傳");
     } finally { flushing = false; }
   }
+  // 加入待上傳佇列（同一筆還沒送出的修改合併成一次）
+  function queue(key, op) {
+    const pend = LS.get(K_PENDING, {});
+    const prev = pend[key];
+    if (prev && !op.del && !prev.del) op = Object.assign({}, prev, op, { fields: Object.assign({}, prev.fields, op.fields), isNew: !!(prev.isNew || op.isNew) });
+    pend[key] = op;
+    LS.set(K_PENDING, pend);
+  }
+  function commit() {
+    if (status.mode === "local") { saveLocal(); emit(); return; }
+    saveCache(); updateSyncedStatus(); flush();
+  }
 
   /* ---------------- 共用介面 ---------------- */
   const Store = {
+    TRIP_FIELDS,
     get mode() { return status.mode; },
     get status() { return status; },
     get user() { return user; },
+    get trip() { return curTrip; },
     items() { return items; },
+    trips() { return trips.length ? trips : (CFG.trips || []); },
     onChange(fn) { listeners.push(fn); },
 
-    async init() {
+    async init(tripId) {
+      if (tripId) curTrip = tripId;
       // 網址加 ?local=1 強制用本機資料（開發測試用；線上版沒有 data/seed.js，所以會是空的）
       const forceLocal = /[?&]local=1\b/.test(location.search);
       if (CFG.supabaseUrl && CFG.supabaseKey && !forceLocal) await initCloud();
       else { loadLocal(); emit(); }
     },
+    setTrip(id) { curTrip = id; emit(); },
 
-    /* 修改一筆的部分欄位 */
-    patch(id, fields) {
-      const it = items.find(x => x.id === id);
-      if (!it) return;
-      Object.assign(it, fields);
-      if (status.mode === "local") { saveLocalPatch(id, fields); emit(); return; }
-      const pend = LS.get(K_PENDING, {});
-      pend[id] = { fields: Object.assign((pend[id] && pend[id].fields) || {}, fields), isNew: pend[id] && pend[id].isNew, trip: it.trip };
-      LS.set(K_PENDING, pend);
-      updateSyncedStatus();
-      flush();
+    /* 地點資料庫：所有地點，附上它在哪些旅程的清單裡（給「從地點資料庫加入」用） */
+    places() {
+      const inTrips = new Map();
+      plans.forEach(p => { if (!inTrips.has(p.poi)) inTrips.set(p.poi, []); inTrips.get(p.poi).push(p.trip); });
+      return [...places.values()].map(p => {
+        const o = Object.assign({}, p); TRIP_FIELDS.forEach(k => delete o[k]);
+        o.inTrips = inTrips.get(p.id) || [];
+        return withDefaults(o);
+      });
     },
 
+    /* 修改一筆：地點資料寫進地點資料庫，旅程設定寫進目前旅程的清單 */
+    patch(id, fields) {
+      if (!items.some(x => x.id === id)) return;
+      const { place, plan } = split(fields);
+      if (Object.keys(place).length) {
+        Object.assign(places.get(id), place);
+        if (status.mode !== "local") queue("p:" + id, { kind: "place", id, trip: curTrip, fields: place });
+      }
+      if (Object.keys(plan).length) {
+        Object.assign(plans.get(planKey(curTrip, id)).data, plan);
+        if (status.mode !== "local") queue("t:" + planKey(curTrip, id), { kind: "plan", trip: curTrip, poi: id, fields: plan });
+      }
+      commit();
+    },
+
+    /* 新增一個地點（同時加入目前旅程） */
     add(item) {
-      withDefaults(item);
-      items.unshift(item);
-      if (status.mode === "local") { saveLocalPatch(item.id, null, item); emit(); return; }
-      const fields = Object.assign({}, item); delete fields._v;
-      const pend = LS.get(K_PENDING, {});
-      pend[item.id] = { fields, isNew: true, trip: item.trip };
-      LS.set(K_PENDING, pend);
-      updateSyncedStatus();
-      flush();
+      const { place, plan } = split(item);
+      places.set(item.id, Object.assign({ id: item.id }, place));
+      plans.set(planKey(curTrip, item.id), { trip: curTrip, poi: item.id, data: plan });
+      if (status.mode !== "local") {
+        queue("p:" + item.id, { kind: "place", id: item.id, trip: curTrip, fields: Object.assign({ id: item.id }, place), isNew: true });
+        queue("t:" + planKey(curTrip, item.id), { kind: "plan", trip: curTrip, poi: item.id, fields: plan, isNew: true });
+      }
+      commit();
+    },
+
+    /* 把地點資料庫裡已有的地點加進目前旅程（期待度、目標等從空白開始） */
+    addToTrip(poiId, fields) {
+      if (!places.has(poiId) || plans.has(planKey(curTrip, poiId))) return;
+      const data = Object.assign({ goals: [], must_go: false, archived: false }, fields || {});
+      plans.set(planKey(curTrip, poiId), { trip: curTrip, poi: poiId, data });
+      if (status.mode !== "local") queue("t:" + planKey(curTrip, poiId), { kind: "plan", trip: curTrip, poi: poiId, fields: data, isNew: true });
+      commit();
+    },
+
+    /* 從目前旅程移除（地點資料保留在資料庫） */
+    removeFromTrip(poiId) {
+      const k = planKey(curTrip, poiId);
+      if (!plans.has(k)) return;
+      plans.delete(k);
+      if (status.mode !== "local") queue("t:" + k, { kind: "plan", trip: curTrip, poi: poiId, del: true });
+      commit();
+    },
+
+    /* 新增旅程：名稱＝年月＋目的地，例如「2027/03 岡山」 */
+    addTrip({ dest, ym, center, zoom }) {
+      const name = ym.replace("-", "/") + " " + dest;
+      const id = "trip-" + ym + "-" + Math.random().toString(36).slice(2, 7);
+      const t = { id, name, dest, ym, center: center || null, zoom: zoom || 11 };
+      trips.push(t); trips.sort(byYm);
+      if (status.mode !== "local") queue("r:" + id, { kind: "trip", id, fields: { name, dest, ym, center: t.center, zoom: t.zoom }, isNew: true });
+      commit();
+      return id;
     },
 
     async signIn(email, password) {

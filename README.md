@@ -5,7 +5,7 @@
 
 - 核心規則不變（依 `東京旅遊_2026-11/決策輔助工具/旅行決策輔助工具_概念規格_v1.0.md`）：
   總分 = 期待度合計 + 網路評價（餐飲類）；期待度合計 = 原本期待度 + 追加目標各自的期待度；必去獨立標記、不進總分；交通一律交給 Google Maps。
-- 資料格式沿用 `Claude outputs/schema.json`，另外加一個 `trip` 欄位區分不同旅行。
+- 資料格式沿用 `Claude outputs/schema.json`。地點資料庫所有旅程共用；期待度、目標、必去、封存、狀態屬於各旅程，另外存。
 
 ## 跟舊版相比
 
@@ -36,6 +36,8 @@ data/photos.js                            地點圖片清單（只有圖片網�
 data/seed.js                              ⚠️ 初始資料（本機模式用，含私人資料，不要上傳）
 supabase/01_建立資料表.sql                 建立雲端資料表（執行一次）
 supabase/02_匯入資料.sql                   ⚠️ 匯入 82 筆候選（含私人資料，不要上傳）
+supabase/03–07_*.sql                      圖片、地區三層、座標、私人圖片空間等更新（都已執行）
+supabase/08_旅程分開.sql                   建立旅程與旅程清單，把旅程設定搬出地點資料庫（分兩段執行）
 tools/serve.ps1                           本機測試用伺服器
 .gitignore                                排除上面兩個 ⚠️ 檔案，不會被提交到 GitHub
 ```
@@ -83,7 +85,10 @@ powershell -ExecutionPolicy Bypass -File tools\serve.ps1
 ## 給 Claude（接手的對話）
 
 - 改版：直接改這個資料夾的檔案，用 `tools/serve.ps1` 在本機測試。依交接區規則，要確認地圖底圖有顯示，並用手機寬度（375px）檢查。
-- 雲端資料：表 `public.pois`，欄位 `id`、`trip`、`data`（jsonb，內容依 schema.json）、`version`（每次更新自動 +1）。
+- 雲端資料（2026-10-19 起分三個表）：
+  - `public.pois`：地點資料庫，所有旅程共用。欄位 `id`、`data`（jsonb，內容依 schema.json）、`version`（每次更新自動 +1）；`trip` 只記錄最早加入的旅程。
+  - `public.trips`：旅程，`id`、`name`（例：2026/11 東京）、`dest`、`ym`、`center`、`zoom`。
+  - `public.trip_pois`：旅程清單，`trip_id`＋`poi_id`，`data` 只放旅程設定（expectation、goals、must_go、archived、archive_date、archive_reason、status）。
   App 寫入時只合併改了的欄位，並比對 version，避免互相覆蓋。
 - 期待度、目標、必去、封存、地區、類型、標籤是使用者的判斷，AI 不代填。
 - Claude 直接寫入雲端的方式（REST API＋金鑰怎麼保管）還沒設定，等使用者決定。在那之前，請產出 SQL 或 JSON，由使用者貼上或匯入。

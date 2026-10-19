@@ -7,9 +7,11 @@ window.APP_CONFIG = {
   supabaseUrl: "https://jftwkboltjmvxcbvtldi.supabase.co",
   supabaseKey: "sb_publishable_nsVhS7OU5eQ87hkY_t1EyQ_SW9eiU3Q",
 
-  // 旅行清單：之後岡山等新旅行加在這裡。center/zoom 是地圖預設位置。
+  // 旅程：雲端模式從 Supabase 的 trips 資料表讀取（在 App 裡就能新增）；
+  // 這裡的清單只在本機模式、或雲端還沒載入時使用。center/zoom 是地圖預設位置。
   trips: [
-    { id: "tokyo-2026-11", name: "東京 2026/11", center: [35.69, 139.75], zoom: 12 }
+    { id: "tokyo-2026-11", name: "2026/11 東京", dest: "東京", ym: "2026-11", center: [35.69, 139.75], zoom: 12 },
+    { id: "okayama-2027-03", name: "2027/03 岡山", dest: "岡山", ym: "2027-03", center: [34.6661, 133.9185], zoom: 9 }
   ],
   defaultTrip: "tokyo-2026-11"
 };
