@@ -318,7 +318,11 @@
       // 網址加 ?local=1 強制用本機資料（開發測試用；線上版沒有 data/seed.js，所以會是空的）
       const forceLocal = /[?&]local=1\b/.test(location.search);
       if (CFG.supabaseUrl && CFG.supabaseKey && !forceLocal) await initCloud();
-      else { loadLocal(); emit(); }
+      else {
+        // 初始資料只在本機模式需要（含私人資料，不在線上版裡）
+        if (!window.SEED_POIS) await loadScript("data/seed.js").catch(() => console.warn("沒有 data/seed.js，本機模式從空白開始"));
+        loadLocal(); emit();
+      }
     },
     setTrip(id) { curTrip = id; emit(); },
 
