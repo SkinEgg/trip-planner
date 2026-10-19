@@ -694,8 +694,12 @@
       const add = [...new Set(t.value.split(/[、,，]/).map(s => s.trim()))].filter(s => s && !cur.some(g => g.name === s));
       t.value = ""; t.blur();
       if (!add.length) return;
-      window.Store.patch(state.detail, { goals: cur.concat(add.map(name => ({ name }))) });
-      toast("已新增目標；選「＋分數」就會加到期待度");
+      // 使用者規則（2026-10-19）：已預約的一律必去，「已預約…」目標期待度 +5
+      const booked = add.some(n => n.startsWith("已預約"));
+      const fields = { goals: cur.concat(add.map(name => name.startsWith("已預約") ? { name, exp: 5 } : { name })) };
+      if (booked) fields.must_go = true;
+      window.Store.patch(state.detail, fields);
+      toast(booked ? "已預約：設為必去、期待度 +5" : "已新增目標；選「＋分數」就會加到期待度");
       return;
     }
     else if (key === "cat-main") {
