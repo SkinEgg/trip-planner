@@ -90,5 +90,5 @@ on conflict (trip_id, poi_id) do nothing;
 
 select (select count(*) from public.trips) as trips, (select count(*) from public.trip_pois) as trip_pois, (select count(*) from public.pois) as pois;
 
--- ===== 第二段（新版 App 上線後再執行）=====
+-- ===== 第二段：已改寫成 09_旅程分開_第二段.sql 並執行（2026-10-19）=====
 -- update public.pois set data = data - 'expectation' - 'goals' - 'must_go' - 'archived' - 'archive_date' - 'archive_reason' - 'status' - 'trip';
