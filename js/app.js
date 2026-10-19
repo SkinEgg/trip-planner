@@ -26,10 +26,15 @@
     me: null,           // 我的位置 [lat, lng]
     f: Object.assign({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", hideClosed: false, showArchived: false }, saved.v === 2 ? saved.f : {})
   };
-  if (!CFG.trips.some(t => t.id === state.trip)) state.trip = CFG.defaultTrip;
   // v: 2 = 地區改三層後的篩選格式；舊版存的篩選條件不沿用
   function persistUi() { LS.set("tripapp.ui.v1", { v: 2, tab: state.tab, trip: state.trip, sort: state.sort, f: state.f }); }
-  function tripCfg() { return CFG.trips.find(t => t.id === state.trip) || CFG.trips[0]; }
+  // 旅程設定：沒有地圖中心的旅程（剛新增、目的地查不到）先看整個日本，加了地點後自動縮放到地點
+  const JAPAN = { center: [36.2, 138.25], zoom: 5 };
+  function tripCfg() {
+    const all = window.Store.trips();
+    const t = all.find(x => x.id === state.trip) || all[0] || { id: state.trip, name: "旅行決策" };
+    return Object.assign({}, t, Array.isArray(t.center) ? {} : JAPAN, { zoom: Array.isArray(t.center) ? (t.zoom || 12) : JAPAN.zoom });
+  }
 
   /* ---------------- 共用小工具 ---------------- */
   let toastTimer = null;
@@ -42,7 +47,7 @@
   function nameOf(it) { return it.name_clean || it.name || "（未命名）"; }
   function iconHtml(it) { return L_.isGinkgo(it) ? GINKGO_SVG : L_.typeIcon(it); }
   function getItem(id) { return window.Store.items().find(x => x.id === id); }
-  function tripItems() { return window.Store.items().filter(x => x.trip === state.trip); }
+  function tripItems() { return window.Store.items(); }   // Store 只給目前旅程的清單
 
   function closedInfo(it) {
     const c = L_.closedOn(it, state.date);
@@ -200,6 +205,9 @@
       : sort === "rec" ? " · 必去優先，再依期待度、網路評價" : "";
     $("#listCount").innerHTML = `${list.length} 筆${list.length !== total ? `（共 ${total} 筆）` : ""}${sortNote}`;
 
+    if (!tripItems().length) {
+      $("#list").innerHTML = `<div class="empty">這個旅程還沒有地點。<br><button class="btn" data-pick>📚 從地點資料庫加入</button></div>`; return;
+    }
     if (!list.length) { $("#list").innerHTML = `<div class="empty">目前的條件下沒有符合的地點。<br>試著放寬篩選或清除搜尋。</div>`; return; }
     if (sort === "region") {
       const groups = new Map();
@@ -213,6 +221,7 @@
     }
   }
   $("#list").addEventListener("click", e => {
+    if (e.target.closest("[data-pick]")) { openPicker(); return; }
     if (e.target.closest("[data-go]")) return;   // 導航按鈕直接開 Google Maps
     const c = e.target.closest(".card"); if (c) openDetail(c.dataset.id);
   });
@@ -226,7 +235,7 @@
   $("#listCount").addEventListener("click", e => { if (e.target.closest("[data-relocate]")) locate({ fly: false }); });
 
   /* ---------------- 地圖 ---------------- */
-  let map = null, markerLayer = null, meLayer = null, refMarker = null, refPopup = null, fitted = false;
+  let map = null, markerLayer = null, meLayer = null, refMarker = null, refPopup = null, fitted = false, centeredTrip = null;
   function ensureMap() {
     if (map) return;
     const t = tripCfg();
@@ -272,6 +281,10 @@
       const near = withCoord.filter(it => it.must_go || L_.distanceM(tripCfg().center, it.coord) < 15000);
       const pts = (near.length ? near : withCoord).map(it => it.coord);
       map.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 14 });
+    } else if (!fitted && centeredTrip !== state.trip) {
+      // 還沒有地點的旅程：先移到旅程的地圖中心（加了地點後再自動縮放）
+      centeredTrip = state.trip;
+      map.setView(tripCfg().center, tripCfg().zoom);
     }
     const missing = list.length - withCoord.length;
     let note = $("#mapView .map-note");
@@ -361,15 +374,14 @@
     if (!(history.state && history.state.ov)) history.pushState({ ov: 1 }, "");
   }
   function hideOverlays(keepHistory) {
-    ["filter", "detail"].forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
+    ["filter", "detail", "trip", "pick"].forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
     if (overlay === "detail") state.detail = null;
     overlay = null;
     if (!keepHistory && history.state && history.state.ov) history.back();
   }
   function closeOverlay() { if (history.state && history.state.ov) history.back(); else hideOverlays(true); }
   window.addEventListener("popstate", () => { if (overlay) hideOverlays(true); });
-  $("#filterBackdrop").addEventListener("click", closeOverlay);
-  $("#detailBackdrop").addEventListener("click", closeOverlay);
+  ["filter", "detail", "trip", "pick"].forEach(n => $("#" + n + "Backdrop").addEventListener("click", closeOverlay));
   document.addEventListener("keydown", e => { if (e.key === "Escape" && overlay) closeOverlay(); });
 
   /* ---------------- 篩選 ---------------- */
@@ -633,6 +645,7 @@
       </details>
       <div class="d-block">
         <button class="btn danger" style="width:100%" data-act="archive">${it.archived ? "↩️ 取消封存" : "🗄️ 封存（不想去了）"}</button>
+        <button class="btn" style="width:100%;margin-top:8px" data-act="untrip">從「${esc(tripCfg().name)}」移除（地點資料保留）</button>
       </div>`;
     sh.querySelectorAll("details").forEach((d, i) => { if (openState[i]) d.open = true; });
     sh.scrollTop = st;
@@ -663,6 +676,13 @@
     const a = e.target.closest("[data-act]"); if (!a) return;
     if (a.dataset.act === "must") window.Store.patch(id, { must_go: !it.must_go });
     if (a.dataset.act === "onmap") { closeOverlay(); switchTab("map"); setTimeout(() => selectOnMap(id, true), 120); }
+    if (a.dataset.act === "untrip") {
+      if (!confirm(`把「${nameOf(it)}」從「${tripCfg().name}」移除？\n查證過的地點資料會留在資料庫，之後可以再加回來；這次的期待度、目標、必去會清掉。`)) return;
+      closeOverlay();
+      window.Store.removeFromTrip(id);
+      toast("已從這個旅程移除");
+      return;
+    }
     if (a.dataset.act === "archive") {
       if (it.archived) window.Store.patch(id, { archived: false });
       else {
@@ -723,6 +743,115 @@
     return { is_food, gm_tier: is_food ? L_.gmTierOf(it.gm_score) : null, tabelog_tier: is_food ? L_.tabelogTierOf(it.tabelog_score) : null };
   }
 
+  /* ---------------- 旅程（切換／新增） ----------------
+     每個旅程有自己的清單；期待度、目標、必去、封存只算在那個旅程。地點的查證資料所有旅程共用。 */
+  $("#tripTitle").addEventListener("click", openTrips);
+  function openTrips() { showOverlay("trip"); renderTrips(); }
+  function tripCounts() {
+    const c = {};
+    window.Store.places().forEach(p => p.inTrips.forEach(t => { c[t] = (c[t] || 0) + 1; }));
+    return c;
+  }
+  function renderTrips() {
+    const S = window.Store, c = tripCounts();
+    const now = new Date();
+    const ym = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    $("#tripSheet").innerHTML = `
+      <div class="sheet-head"><h2>旅程</h2><button class="icon-btn" data-close aria-label="關閉">✕</button></div>
+      <p class="small">每個旅程有自己的清單。期待度、目標、必去、封存只算在那個旅程；地點的查證資料所有旅程共用。</p>
+      <div class="trip-list">${S.trips().map(t => `<button class="trip-row ${t.id === state.trip ? "on" : ""}" data-trip="${esc(t.id)}">
+          <span class="trip-name">${esc(t.name)}</span><span class="small">${c[t.id] || 0} 個地點</span></button>`).join("")}</div>
+      <form class="trip-new" id="tripNewForm">
+        <div class="d-label">＋ 新增旅程（年月＋目的地）</div>
+        <div class="trip-new-row">
+          <input type="month" name="ym" value="${ym}" required aria-label="年月">
+          <input name="dest" placeholder="目的地，例如：京都" required aria-label="目的地">
+        </div>
+        <button class="btn primary" type="submit">建立旅程</button>
+        ${S.mode === "local" ? '<p class="small">本機模式：旅程只存在這個瀏覽器。</p>' : ""}
+      </form>`;
+  }
+  $("#tripSheet").addEventListener("click", e => {
+    if (e.target.closest("[data-close]")) { closeOverlay(); return; }
+    const b = e.target.closest("[data-trip]"); if (!b) return;
+    switchTrip(b.dataset.trip);
+    closeOverlay();
+  });
+  $("#tripSheet").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target, dest = f.dest.value.trim(), ym = f.ym.value;
+    if (!dest || !/^\d{4}-\d{2}$/.test(ym)) return;
+    const btn = f.querySelector("[type=submit]");
+    btn.disabled = true; btn.textContent = "建立中…";
+    const center = await geocodeDest(dest);
+    const id = window.Store.addTrip({ dest, ym, center, zoom: center ? 11 : null });
+    switchTrip(id);
+    closeOverlay();
+    toast(`已建立「${ym.replace("-", "/")} ${dest}」` + (center ? "" : "；查不到目的地位置，地圖先顯示全日本"));
+  });
+  // 目的地 → 地圖中心：國土地理院地址搜尋，優先選「縣＋城市名＋市」（例：岡山県岡山市），查不到就回 null
+  async function geocodeDest(dest) {
+    try {
+      const r = await fetch("https://msearch.gsi.go.jp/address-search/AddressSearch?q=" + encodeURIComponent(dest));
+      const list = await r.json();
+      const safe = dest.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp("^(\\S+?[都道府県])?" + safe + "(市|区|町|村|都|道|府|県)?$");
+      const hit = list.find(x => re.test(x.properties.title)) || list.find(x => x.properties.title.startsWith(dest));
+      if (!hit) return null;
+      const [lng, lat] = hit.geometry.coordinates;
+      return [lat, lng];
+    } catch (err) { return null; }
+  }
+  function switchTrip(id) {
+    if (id === state.trip) return;
+    state.trip = id; state.sel = null; fitted = false; centeredTrip = null;
+    window.Store.setTrip(id);
+    changed();
+  }
+
+  /* ---------------- 從地點資料庫加入 ----------------
+     以前旅程查證過的地點直接加進這次旅程，不用重新查證；期待度、目標、必去從空白開始 */
+  let pickQ = "";
+  function openPicker() {
+    showOverlay("pick");
+    pickQ = "";
+    $("#pickSheet").innerHTML = `
+      <div class="sheet-head"><h2>從地點資料庫加入</h2><button class="icon-btn" data-close aria-label="關閉">✕</button></div>
+      <p class="small" id="pickNote"></p>
+      <input class="pick-search" type="search" placeholder="搜尋名稱、地區、類型、地址…" data-pick-q>
+      <div id="pickList"></div>`;
+    renderPickList();
+    $("#pickSheet").scrollTop = 0;
+  }
+  function renderPickList() {
+    const S = window.Store;
+    const names = new Map(S.trips().map(t => [t.id, t.name]));
+    const q = L_.norm(pickQ);
+    const all = S.places().filter(p => !p.inTrips.includes(state.trip));
+    const list = all
+      .filter(p => !q || L_.norm([p.name, p.name_clean, p.region, p.category, p.address, (p.tags || []).join(" ")].join(" ")).includes(q))
+      .sort((a, b) => (a.region || "").localeCompare(b.region || "", "ja") || nameOf(a).localeCompare(nameOf(b), "ja"));
+    $("#pickNote").textContent = `加入「${tripCfg().name}」。資料庫裡還有 ${all.length} 個地點不在這個旅程。`;
+    $("#pickList").innerHTML = list.length ? list.slice(0, 150).map(p => `<div class="pick-row">
+        <div class="card-icon">${iconHtml(p)}</div>
+        <div class="card-main">
+          <div class="card-name">${esc(nameOf(p))}</div>
+          <div class="card-sub">${esc(L_.regionLabel(p))}${p.inTrips.length ? ` · 在 ${p.inTrips.map(t => esc(names.get(t) || t)).join("、")}` : ""}</div>
+        </div>
+        <button class="btn" data-add="${esc(p.id)}">＋ 加入</button>
+      </div>`).join("") + (list.length > 150 ? `<p class="small">還有 ${list.length - 150} 筆，請用搜尋縮小範圍。</p>` : "")
+      : `<div class="empty">${all.length ? "沒有符合搜尋的地點。" : "資料庫裡的地點都已經在這個旅程了。"}</div>`;
+  }
+  $("#pickSheet").addEventListener("input", e => { if (e.target.matches("[data-pick-q]")) { pickQ = e.target.value.trim(); renderPickList(); } });
+  $("#pickSheet").addEventListener("click", e => {
+    if (e.target.closest("[data-close]")) { closeOverlay(); return; }
+    const b = e.target.closest("[data-add]"); if (!b) return;
+    window.Store.addToTrip(b.dataset.add);
+    fitted = false;
+    renderPickList();
+    toast("已加入這個旅程");
+  });
+
   /* ---------------- 更多 ---------------- */
   let installEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (state.tab === "more") renderMore(); });
@@ -755,12 +884,12 @@
           : `<p>${esc(S.status.text)}</p>${S.user ? `<p class="small">登入帳號：${esc(S.user.email || "")}</p>
              <div class="btn-col"><button class="btn" data-m="refresh">🔄 重新同步</button><button class="btn" data-m="logout">登出</button></div>` : ""}`}
       </div>
-      ${CFG.trips.length > 1 ? `<div class="panel"><h3>旅行</h3><select data-m="trip" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--paper)">
-        ${CFG.trips.map(t => `<option value="${esc(t.id)}" ${t.id === state.trip ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></div>` : ""}
       <div class="panel">
         <h3>${esc(tripCfg().name)}</h3>
         <p>候選 ${items.length - arch} 筆（封存 ${arch} 筆）· 必去 ${must} 筆 · 已填期待度 ${filled} 筆</p>
         <div class="btn-col">
+          <button class="btn" data-m="trips">🧳 切換／新增旅程</button>
+          <button class="btn" data-m="pick">📚 從地點資料庫加入</button>
           <button class="btn" data-m="add">＋ 新增候選地點</button>
           <button class="btn" data-m="export">⬇️ 匯出 JSON（備份／交給 Claude）</button>
           <button class="btn" data-m="import">⬆️ 匯入 JSON</button>
@@ -782,12 +911,13 @@
     if (m === "refresh") { await window.Store.refresh(); toast("已重新同步"); }
     if (m === "logout") { if (confirm("確定要登出？")) await window.Store.signOut(); }
     if (m === "install" && installEvt) { installEvt.prompt(); installEvt = null; }
+    if (m === "trips") openTrips();
+    if (m === "pick") openPicker();
     if (m === "add") addItem();
     if (m === "export") exportJson();
     if (m === "import") $("#importFile").click();
   });
   $("#moreView").addEventListener("change", e => {
-    if (e.target.dataset.m === "trip") { state.trip = e.target.value; fitted = false; state.sel = null; persistUi(); changed(); }
     if (e.target.id === "importFile" && e.target.files[0]) importJson(e.target.files[0]);
   });
 
@@ -835,12 +965,15 @@
       try { parsed = JSON.parse(r.result); } catch (e) { alert("檔案不是有效的 JSON。"); return; }
       const incoming = Array.isArray(parsed) ? parsed : (parsed.items || []);
       if (!incoming.length) { alert("檔案裡找不到地點資料。"); return; }
+      // 比對整個地點資料庫：以前旅程查證過的地點直接加進這個旅程，不重複建立
       const key = it => L_.norm(it.name_clean || it.name) + "|" + L_.norm(it.address);
-      const all = window.Store.items();
+      const inTrip = new Map(window.Store.items().map(x => [x.id, x]));
+      const all = window.Store.places().map(p => inTrip.get(p.id) || p);
       const byId = new Map(all.map(x => [x.id, x])), byKey = new Map(all.map(x => [key(x), x]));
-      const updates = [], adds = [];
+      const updates = [], adds = [], joins = [];
       incoming.forEach(inc => {
         const ex = (inc.id && byId.get(inc.id)) || byKey.get(key(inc));
+        if (ex && !inTrip.has(ex.id)) joins.push(ex.id);
         if (ex) {
           const fields = {};
           Object.keys(inc).forEach(k => {
@@ -853,11 +986,12 @@
           adds.push(Object.assign({ id: L_.newId(), trip: state.trip, archived: false, must_go: false, expectation: null, tags: [], goals: [] }, inc));
         }
       });
-      if (!updates.length && !adds.length) { alert("資料都一樣，沒有需要更新的地方。"); return; }
-      if (!confirm(`將更新 ${updates.length} 筆、新增 ${adds.length} 筆，確定匯入？`)) return;
+      if (!updates.length && !adds.length && !joins.length) { alert("資料都一樣，沒有需要更新的地方。"); return; }
+      if (!confirm(`將更新 ${updates.length} 筆、新增 ${adds.length} 筆` + (joins.length ? `（其中 ${joins.length} 筆是資料庫裡已有的地點，直接加進這個旅程）` : "") + "，確定匯入？")) return;
+      joins.forEach(id => window.Store.addToTrip(id));
       updates.forEach(([id, f]) => window.Store.patch(id, f));
       adds.forEach(it => { if (!it.maps_url) it.maps_url = L_.mapsUrl(it); window.Store.add(it); });
-      toast(`已更新 ${updates.length} 筆、新增 ${adds.length} 筆`);
+      toast(`已更新 ${updates.length} 筆、新增 ${adds.length} 筆` + (joins.length ? `、從資料庫加入 ${joins.length} 筆` : ""));
     };
     r.readAsText(file);
   }
@@ -907,8 +1041,13 @@
 
   /* ---------------- 啟動 ---------------- */
   $("#sortSel").value = state.sort;
-  window.Store.onChange(render);
-  window.Store.init().then(() => {
+  window.Store.onChange(() => {
+    // 上次選的旅程不存在了（例如換了裝置）：改回預設旅程
+    const all = window.Store.trips();
+    if (all.length && !all.some(t => t.id === state.trip)) switchTrip((all.find(t => t.id === CFG.defaultTrip) || all[0]).id);
+    render();
+  });
+  window.Store.init(state.trip).then(() => {
     switchTab(state.tab);
     // 上次停在「依距離」排序：重新取得位置（位置不跨次保存）
     if (state.sort === "dist") locate({ fly: false });

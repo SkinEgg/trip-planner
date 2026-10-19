@@ -20,7 +20,7 @@
 <div id="app">
   <header class="topbar">
     <div class="topbar-row">
-      <div class="title" id="tripTitle">旅行決策</div>
+      <button class="title trip-btn" id="tripTitle" title="切換或新增旅程">旅行決策</button>
       <button class="date-btn" id="dateBtn" title="查看哪一天的公休狀態">📅 <span id="dateLabel">今天</span></button>
       <input type="date" id="dateInput" class="visually-hidden" tabindex="-1" aria-hidden="true">
       <span class="sync-pill" id="syncPill"></span>
@@ -62,6 +62,14 @@
 <!-- 篩選（手機：底部抽屜；電腦：左側欄） -->
 <div class="sheet-backdrop" id="filterBackdrop" hidden></div>
 <div class="sheet" id="filterSheet" hidden role="dialog" aria-label="篩選"></div>
+
+<!-- 旅程：切換／新增 -->
+<div class="sheet-backdrop" id="tripBackdrop" hidden></div>
+<div class="sheet" id="tripSheet" hidden role="dialog" aria-label="旅程"></div>
+
+<!-- 從地點資料庫加入 -->
+<div class="sheet-backdrop" id="pickBackdrop" hidden></div>
+<div class="sheet" id="pickSheet" hidden role="dialog" aria-label="從地點資料庫加入"></div>
 
 <!-- 地點詳情 -->
 <div class="sheet-backdrop" id="detailBackdrop" hidden></div>
