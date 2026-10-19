@@ -155,6 +155,17 @@
     }
     changed();
   });
+  // 「、」或逗號分隔成清單；括號裡的逗號不切（例：銀杏（待確認，截圖有視覺佐證））
+  function splitList(text) {
+    const out = []; let cur = "", depth = 0;
+    for (const ch of String(text || "")) {
+      if ("（(".includes(ch)) depth++;
+      if ("）)".includes(ch)) depth = Math.max(0, depth - 1);
+      if (!depth && "、,，".includes(ch)) { out.push(cur); cur = ""; } else cur += ch;
+    }
+    out.push(cur);
+    return out.map(s => s.trim()).filter(Boolean);
+  }
   function toggleIn(arr, v) { const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); else arr.push(v); }
 
   $("#dateBtn").addEventListener("click", () => {
@@ -450,7 +461,7 @@
       </div>
       <div class="f-sec">
         <div class="f-row"><span>期待度至少</span><select data-sel="minExp">
-          <option value="">不限</option>${[5, 4, 3, 2, 1].map(n => `<option value="${n}" ${String(f.minExp) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
+          <option value="">不限</option>${[10, 7, 5, 4, 3, 2, 1].map(n => `<option value="${n}" ${String(f.minExp) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
         </select></div>
         <div class="f-row"><span>驗證等級</span><select data-sel="verify">
           <option value="">不限</option>
@@ -708,10 +719,10 @@
     }
     const key = t.dataset.edit; if (!key || !state.detail) return;
     const fields = {};
-    if (key === "tags") fields.tags = t.value.split(/[、,，]/).map(s => s.trim()).filter(Boolean);
+    if (key === "tags") fields.tags = splitList(t.value);
     else if (key === "goal-add") {
       const cur = L_.goalList(getItem(state.detail));
-      const add = [...new Set(t.value.split(/[、,，]/).map(s => s.trim()))].filter(s => s && !cur.some(g => g.name === s));
+      const add = [...new Set(splitList(t.value))].filter(s => s && !cur.some(g => g.name === s));
       t.value = ""; t.blur();
       if (!add.length) return;
       // 使用者規則（2026-10-19）：已預約的一律必去，「已預約…」目標期待度 +5
