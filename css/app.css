@@ -279,3 +279,12 @@ details.more[open] summary::after { content: " ▴"; }
 @media (min-width: 900px) {
   #tripSheet, #pickSheet { left: 50%; right: auto; width: 520px; margin-left: -260px; }
 }
+
+/* 注意事項（AI 查到的營業限制、需預約）與我的備註（使用者自己加註） */
+.note-box { margin-top: 10px; padding: 9px 12px; border-radius: 10px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.note-box b { display: block; font-size: 12.5px; margin-bottom: 2px; }
+.note-box.caution { background: var(--mid-soft); color: var(--ink); border-left: 4px solid var(--mid); }
+.note-box.caution b { color: var(--mid); }
+.note-box.mine { background: var(--teal-soft); color: var(--ink); border-left: 4px solid var(--teal); }
+.note-box.mine b { color: var(--teal); }
+.badge.b-note { background: var(--mid-soft); color: var(--mid); }
