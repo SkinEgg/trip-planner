@@ -26,6 +26,7 @@
       <span class="sync-pill" id="syncPill"></span>
     </div>
     <div class="quick-row" id="quickRow"></div>
+    <button class="remind-bar" id="remindBar" hidden></button>
   </header>
 
   <div class="body">
@@ -48,6 +49,7 @@
         <div class="list-count" id="listCount"></div>
         <div id="list"></div>
       </section>
+      <section class="view" id="scheduleView"></section>
       <section class="view" id="moreView"></section>
     </main>
   </div>
@@ -55,6 +57,7 @@
   <nav class="bottom-nav">
     <button data-tab="map" class="active"><span>🗺️</span>地圖</button>
     <button data-tab="list"><span>📋</span>清單</button>
+    <button data-tab="schedule"><span>📅</span>行程</button>
     <button data-tab="more"><span>☰</span>更多</button>
   </nav>
 </div>
@@ -70,6 +73,10 @@
 <!-- 從地點資料庫加入 -->
 <div class="sheet-backdrop" id="pickBackdrop" hidden></div>
 <div class="sheet" id="pickSheet" hidden role="dialog" aria-label="從地點資料庫加入"></div>
+
+<!-- 排程：新增／編輯一項 -->
+<div class="sheet-backdrop" id="schedBackdrop" hidden></div>
+<div class="sheet" id="schedSheet" hidden role="dialog" aria-label="編輯行程"></div>
 
 <!-- 地點詳情 -->
 <div class="sheet-backdrop" id="detailBackdrop" hidden></div>

@@ -10,8 +10,8 @@ window.APP_CONFIG = {
   // 旅程：雲端模式從 Supabase 的 trips 資料表讀取（在 App 裡就能新增）；
   // 這裡的清單只在本機模式、或雲端還沒載入時使用。center/zoom 是地圖預設位置。
   trips: [
-    { id: "tokyo-2026-11", name: "2026/11 東京", dest: "東京", ym: "2026-11", center: [35.69, 139.75], zoom: 12 },
-    { id: "okayama-2027-03", name: "2027/03 岡山", dest: "岡山", ym: "2027-03", center: [34.6661, 133.9185], zoom: 9 }
+    { id: "tokyo-2026-11", name: "2026/11 東京", dest: "東京", ym: "2026-11", center: [35.69, 139.75], zoom: 12, start_date: "2026-11-15", end_date: "2026-11-19" },
+    { id: "okayama-2027-03", name: "2027/03 岡山", dest: "岡山", ym: "2027-03", center: [34.6661, 133.9185], zoom: 9, start_date: "2027-03-05", end_date: "2027-03-10" }
   ],
   defaultTrip: "tokyo-2026-11"
 };

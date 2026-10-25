@@ -199,7 +199,7 @@
         ${L_.goalList(it).length ? `<div class="card-goals">🎯 ${L_.goalList(it).map(g => esc(g.name)).join("、")}</div>` : ""}
       </div>
       <div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>
-      ${withGo ? `<a class="go-btn" href="${esc(it.maps_url || L_.mapsUrl(it))}" target="_blank" rel="noopener" title="在 Google Maps 開啟" data-go>🧭</a>` : ""}
+      ${withGo ? `<a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="用 Google Maps 導航" data-go>🧭</a>` : ""}
     </div>`;
   }
 
@@ -320,7 +320,7 @@
     el.hidden = false;
     el.innerHTML = cardHtml(it, rankMap(filtered()), false) +
       `<div class="peek-actions">
-        <a class="btn primary" href="${esc(it.maps_url || L_.mapsUrl(it))}" target="_blank" rel="noopener">🧭 Google Maps</a>
+        <a class="btn primary" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener">🧭 導航</a>
         <button class="btn" data-act="detail">詳細資訊</button>
       </div>`;
   }
@@ -386,14 +386,14 @@
     if (!(history.state && history.state.ov)) history.pushState({ ov: 1 }, "");
   }
   function hideOverlays(keepHistory) {
-    ["filter", "detail", "trip", "pick"].forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
+    ["filter", "detail", "trip", "pick", "sched"].forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
     if (overlay === "detail") state.detail = null;
     overlay = null;
     if (!keepHistory && history.state && history.state.ov) history.back();
   }
   function closeOverlay() { if (history.state && history.state.ov) history.back(); else hideOverlays(true); }
   window.addEventListener("popstate", () => { if (overlay) hideOverlays(true); });
-  ["filter", "detail", "trip", "pick"].forEach(n => $("#" + n + "Backdrop").addEventListener("click", closeOverlay));
+  ["filter", "detail", "trip", "pick", "sched"].forEach(n => $("#" + n + "Backdrop").addEventListener("click", closeOverlay));
   document.addEventListener("keydown", e => { if (e.key === "Escape" && overlay) closeOverlay(); });
 
   /* ---------------- 篩選 ---------------- */
@@ -608,7 +608,7 @@
       ${photoHtml}
       <div class="status-line">${badges}</div>
       <div class="d-actions">
-        <a class="btn primary" href="${esc(it.maps_url || L_.mapsUrl(it))}" target="_blank" rel="noopener">🧭 Google Maps</a>
+        <a class="btn primary" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener">🧭 導航</a>
         <button class="btn ${it.must_go ? "must-on" : ""}" data-act="must">${it.must_go ? "★ 必去" : "☆ 必去"}</button>
         ${it.coord ? '<button class="btn" data-act="onmap">📍 地圖</button>' : ""}
       </div>
@@ -868,6 +868,310 @@
     toast("已加入這個旅程");
   });
 
+  /* ---------------- 排程草案 ----------------
+     每個旅程的每日安排（Store.schedule()）。一項可以連到清單裡的地點，也可以只寫標題（例：下飛機）。
+     提醒：App 開著時，依「目前位置 → 下一個行程地點」的直線距離粗估交通時間，算出建議出發時間；
+     要在背景也收到提醒，請用「匯出到行事曆」（行事曆的鬧鐘不受 App 是否開著影響）。 */
+  const LEAD_BUFFER = 10;          // 出發提醒多留的分鐘數
+  const FREE_GAP = 45;             // 下一個行程出發前超過這麼多分鐘，就算「沒有排程」
+  const NEAR_M = 3000;             // 建議地點的「附近」範圍（直線公尺）
+  const pad2 = n => String(n).padStart(2, "0");
+  const ymd = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  const hm = d => pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  function dayLabel(s) {
+    const [y, m, d] = s.split("-").map(Number);
+    return `${m}/${d}（${"日一二三四五六"[new Date(y, m - 1, d).getDay()]}）`;
+  }
+  function schedPlace(s) { return s.poi_id ? getItem(s.poi_id) : null; }
+  function schedName(s) {
+    const p = schedPlace(s);
+    if (s.title && p) return s.title + "・" + nameOf(p);
+    return s.title || (p ? nameOf(p) : (s.poi_id ? "（地點已不在這個旅程）" : "（未命名）"));
+  }
+  function schedAt(s, key) {
+    if (!s.date || !s[key]) return null;
+    const [y, m, d] = s.date.split("-").map(Number), [h, mi] = s[key].split(":").map(Number);
+    return new Date(y, m - 1, d, h, mi);
+  }
+  function tripDays() {
+    const t = tripCfg(), set = new Set(window.Store.schedule().map(s => s.date).filter(Boolean));
+    if (t.start_date && t.end_date) {
+      for (let d = new Date(t.start_date + "T00:00:00"); ymd(d) <= t.end_date; d.setDate(d.getDate() + 1)) set.add(ymd(d));
+    }
+    return [...set].sort();
+  }
+  // 同一天裡：有時間的依時間排，沒有時間的依原本順序
+  function daySorted(date) {
+    return window.Store.schedule().filter(s => s.date === date)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+  }
+  // 新增或改時間時，算出它在當天的位置（夾在前後兩個有時間的項目中間）
+  function orderFor(date, start, excludeId) {
+    const list = daySorted(date).filter(s => s.id !== excludeId);
+    const max = list.reduce((m, s) => Math.max(m, s.order || 0), 0);
+    if (!start) return max + 1;
+    const i = list.findIndex(s => s.start && s.start > start);
+    if (i < 0) return max + 1;
+    const prev = i > 0 ? (list[i - 1].order || 0) : (list[i].order || 0) - 1;
+    return (prev + (list[i].order || 0)) / 2;
+  }
+
+  // 目前進行中的行程（開始後到結束；沒寫結束就算 60 分鐘）
+  function currentPlan(now) {
+    return window.Store.schedule().find(s => {
+      const a = schedAt(s, "start"); if (!a) return false;
+      const b = schedAt(s, "end") || new Date(a.getTime() + 60 * 60000);
+      return a <= now && now < b;
+    }) || null;
+  }
+  // 下一個有時間的行程，與建議出發時間
+  function nextPlan(now) {
+    let best = null;
+    window.Store.schedule().forEach(s => {
+      const at = schedAt(s, "start");
+      if (at && at > now && (!best || at < best.startAt)) best = { item: s, startAt: at };
+    });
+    if (!best) return null;
+    const place = schedPlace(best.item);
+    let from = state.me, fromLabel = "目前位置";
+    if (!from) {
+      // 還沒有定位：用同一天前一個有地點的行程當起點
+      const before = daySorted(best.item.date).filter(s => s.id !== best.item.id && (s.order || 0) < (best.item.order || 0));
+      const prev = before.reverse().map(schedPlace).find(p => p && p.coord);
+      if (prev) { from = prev.coord; fromLabel = nameOf(prev); }
+    }
+    const travel = place && place.coord && from ? L_.travelMinutes(from, place.coord) : null;
+    best.place = place; best.travel = travel; best.fromLabel = fromLabel;
+    best.leaveAt = new Date(best.startAt.getTime() - ((travel ?? 30) + LEAD_BUFFER) * 60000);
+    return best;
+  }
+
+  /* 提醒：最上方的提示列（所有分頁都看得到）＋系統通知（App 開著、已允許通知時） */
+  const remindOn = () => LS.get("tripapp.remind", false) === true;
+  function renderRemind() {
+    const bar = $("#remindBar");
+    const now = new Date(), nx = nextPlan(now);
+    if (!nx || nx.leaveAt - now > 90 * 60000) { bar.hidden = true; return; }
+    const mins = Math.round((nx.leaveAt - now) / 60000);
+    const urgent = mins <= 5;
+    const travelTxt = nx.travel != null ? `估計交通 ${nx.travel} 分（從${nx.fromLabel}）` : "交通時間未知，先抓 30 分";
+    bar.hidden = false;
+    bar.classList.toggle("urgent", urgent);
+    bar.innerHTML = `<b>⏰ ${esc(nx.item.start)} ${esc(schedName(nx.item))}</b><span>${urgent ? "該出發了！" : `建議 ${hm(nx.leaveAt)} 出發（還有 ${mins} 分）`}・${esc(travelTxt)}</span>`;
+    if (urgent && remindOn()) notifyOnce(nx);
+  }
+  function notifyOnce(nx) {
+    const key = "tripapp.notified." + nx.item.id + "." + nx.item.date + nx.item.start;
+    if (LS.get(key, false)) return;
+    LS.set(key, true);
+    const title = "該出發了：" + schedName(nx.item);
+    const body = `${nx.item.start} 開始${nx.travel != null ? `，估計交通 ${nx.travel} 分` : ""}。點開 App 可以導航。`;
+    try {
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(r => r.showNotification(title, { body, tag: key }));
+      else new Notification(title, { body, tag: key });
+    } catch (e) { console.warn(e); }
+  }
+  $("#remindBar").addEventListener("click", () => switchTab("schedule"));
+  // App 開著時，每 30 秒更新提醒；開了提醒就每 3 分鐘悄悄更新一次位置（交通時間才準）
+  let lastQuietLocate = 0;
+  function quietLocate(cb) {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(pos => {
+      state.me = [pos.coords.latitude, pos.coords.longitude];
+      lastQuietLocate = Date.now();
+      if (cb) cb();
+    }, () => { if (cb) cb(); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+  }
+  setInterval(() => {
+    if (document.hidden) return;
+    if (remindOn() && Date.now() - lastQuietLocate > 3 * 60000) quietLocate(renderRemind);
+    renderRemind();
+    if (state.tab === "schedule" && !overlay) renderNow();
+  }, 30000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+
+  /* 沒有排程時：四個選項 → 從這個旅程的清單找附近、今天有開的地點 */
+  function suggestions(kind) {
+    const opt = L_.SUGGEST.find(o => o.id === kind);
+    if (!opt || !state.me) return [];
+    const today = new Date();
+    const list = tripItems().filter(it => !it.archived && Array.isArray(it.coord) && opt.test(it))
+      .filter(it => { const c = L_.closedOn(it, today).level; return c !== "closed" && c !== "gone"; })
+      .map(it => ({ it, d: L_.distanceM(state.me, it.coord) }))
+      .sort((a, b) => a.d - b.d);
+    // 「附近」＝直線 3 km 內；3 km 內都沒有時，列最近的 3 個並標「較遠」
+    const near = list.filter(x => x.d <= NEAR_M);
+    return near.length ? near.slice(0, 6) : list.slice(0, 3).map(x => Object.assign(x, { far: true }));
+  }
+  function nowHtml() {
+    const now = new Date(), cur = currentPlan(now), nx = nextPlan(now);
+    const free = !cur && (!nx || nx.leaveAt - now > FREE_GAP * 60000);
+    let html = "";
+    if (cur) html += `<p>📍 <b>現在：${esc(schedName(cur))}</b>${cur.end ? `（到 ${esc(cur.end)}）` : ""}</p>`;
+    if (nx) {
+      const p = nx.place;
+      html += `<p>⏭ 下一個：<b>${esc(nx.item.start)} ${esc(schedName(nx.item))}</b>　建議 <b>${hm(nx.leaveAt)}</b> 出發
+        <span class="small">（${nx.travel != null ? `估計交通 ${nx.travel} 分，從${esc(nx.fromLabel)}` : "交通時間未知，先抓 30 分"}）</span>
+        ${p ? `<a class="link-btn" href="${esc(L_.navUrl(p))}" target="_blank" rel="noopener">🧭 導航</a>` : ""}</p>`;
+    }
+    if (free) {
+      html += `<p class="free-q">${nx ? `離下個行程出發還有 ${Math.round((nx.leaveAt - now) / 60000)} 分。` : "現在沒有排程。"}想做什麼？</p>
+        <div class="chips suggest-chips">${L_.SUGGEST.map(o => `<button class="chip ${state.suggest === o.id ? "on" : ""}" data-suggest="${o.id}">${o.icon} ${o.label}</button>`).join("")}</div>`;
+      if (state.suggest) {
+        if (!state.me) html += `<p class="small">取得位置中…</p>`;
+        else {
+          const list = suggestions(state.suggest);
+          html += list.length ? (list[0].far ? `<p class="small">3 km 內沒有符合的地點，以下是最近的：</p>` : "") + `<div class="suggest-list">${list.map(({ it, d }) => `<div class="sg-row" data-id="${esc(it.id)}">
+              <div class="card-icon">${iconHtml(it)}</div>
+              <div class="card-main"><div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
+                <div class="card-sub">${esc(L_.subOf(it) || "")} · 📍 ${L_.fmtDistance(d)} · 約 ${L_.travelMinutes(state.me, it.coord)} 分${it.cautions ? ' · <span class="badge b-note">⚠️ 注意</span>' : ""}</div></div>
+              <a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>
+            </div>`).join("")}</div>
+            <p class="small">依直線距離排序；已排除今天公休的地點。交通時間是粗估，以 Google Maps 為準。</p>`
+            : `<p class="small">附近沒有符合的地點（或都公休）。</p>`;
+        }
+      }
+    }
+    return html || `<p class="small">還沒有排程。</p>`;
+  }
+  function renderNow() { const el = $("#nowCard"); if (el) el.innerHTML = nowHtml(); }
+
+  function renderSchedule() {
+    const days = tripDays();
+    const today = ymd(new Date());
+    $("#scheduleView").innerHTML = `
+      <div class="panel now-card"><h3>現在</h3><div id="nowCard">${nowHtml()}</div></div>
+      <div class="sched-tools">
+        <button class="btn" data-s="add">＋ 新增行程</button>
+        <button class="btn" data-s="ics">📅 匯出到行事曆</button>
+        <button class="btn ${remindOn() ? "must-on" : ""}" data-s="remind">${remindOn() ? "🔔 提醒：開" : "🔕 提醒：關"}</button>
+      </div>
+      <p class="small">排程草案：可以隨時改。提醒只在 App 開著時有效；要在背景也收到提醒，請「匯出到行事曆」。</p>
+      ${days.length ? days.map(date => `
+        <div class="day ${date === today ? "today" : ""}">
+          <div class="day-head">${dayLabel(date)}${date === today ? '<span class="badge b-must">今天</span>' : ""}</div>
+          ${daySorted(date).map(s => {
+            const p = schedPlace(s);
+            const sub = [p ? L_.regionLabel(p) : "", s.note || ""].filter(Boolean).map(esc).join(" · ");
+            return `<div class="sched-row" data-sid="${esc(s.id)}">
+              <div class="sched-time">${s.start ? esc(s.start) + (s.end ? `<small>–${esc(s.end)}</small>` : "") : "<small>時間未定</small>"}</div>
+              <div class="card-main"><div class="card-name">${p && p.must_go ? '<span class="star">★</span>' : ""}${esc(schedName(s))}</div>
+                ${sub ? `<div class="card-sub">${sub}</div>` : ""}</div>
+              ${p ? `<a class="go-btn" href="${esc(L_.navUrl(p))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
+            </div>`;
+          }).join("") || '<div class="small sched-empty">（這天還沒有安排）</div>'}
+        </div>`).join("") : '<div class="empty">還沒有排程。按「＋ 新增行程」開始。</div>'}`;
+  }
+  $("#scheduleView").addEventListener("click", async e => {
+    if (e.target.closest("[data-go]")) return;
+    const sg = e.target.closest("[data-suggest]");
+    if (sg) {
+      state.suggest = state.suggest === sg.dataset.suggest ? null : sg.dataset.suggest;
+      if (state.suggest && !state.me) quietLocate(renderNow);
+      renderNow(); return;
+    }
+    const sgRow = e.target.closest(".sg-row"); if (sgRow) { openDetail(sgRow.dataset.id); return; }
+    const row = e.target.closest("[data-sid]"); if (row) { openSchedEdit(row.dataset.sid); return; }
+    const b = e.target.closest("[data-s]"); if (!b) return;
+    if (b.dataset.s === "add") openSchedEdit(null);
+    if (b.dataset.s === "ics") exportIcs();
+    if (b.dataset.s === "remind") {
+      if (remindOn()) { LS.set("tripapp.remind", false); toast("已關閉提醒"); }
+      else {
+        let perm = "unsupported";
+        try { if ("Notification" in window) perm = await Notification.requestPermission(); } catch (err) { }
+        LS.set("tripapp.remind", true);
+        quietLocate(renderRemind);
+        toast(perm === "granted" ? "已開啟提醒（App 開著時會跳通知）" : "已開啟提醒；這支手機的瀏覽器不允許通知，只會在 App 上方顯示");
+      }
+      renderSchedule();
+    }
+  });
+
+  /* 新增／編輯一項 */
+  let editingSid = null;
+  function openSchedEdit(id) {
+    editingSid = id;
+    const s = id ? window.Store.schedule().find(x => x.id === id) : null;
+    if (id && !s) return;
+    const days = tripDays();
+    const date = s ? s.date : (days.find(d => d >= ymd(new Date())) || days[0] || ymd(new Date()));
+    const places = tripItems().filter(it => !it.archived).sort((a, b) => nameOf(a).localeCompare(nameOf(b), "ja"));
+    showOverlay("sched");
+    $("#schedSheet").innerHTML = `
+      <div class="sheet-head"><h2>${s ? "編輯行程" : "新增行程"}</h2><button class="icon-btn" data-close aria-label="關閉">✕</button></div>
+      <form id="schedForm" class="edit-grid">
+        <div class="field"><label>日期</label><input type="date" name="date" value="${esc(date)}" required></div>
+        <div class="field"><label>時間（可空）</label><div class="time-row"><input type="time" name="start" value="${esc(s && s.start || "")}"> ～ <input type="time" name="end" value="${esc(s && s.end || "")}"></div></div>
+        <div class="field"><label>地點（清單裡的）</label><select name="poi_id"><option value="">（不連結地點）</option>
+          ${places.map(it => `<option value="${esc(it.id)}" ${s && s.poi_id === it.id ? "selected" : ""}>${esc(nameOf(it))}</option>`).join("")}</select></div>
+        <div class="field"><label>標題（沒連結地點時必填，例：下飛機）</label><input name="title" value="${esc(s && s.title || "")}"></div>
+        <div class="field"><label>備註</label><textarea name="note">${esc(s && s.note || "")}</textarea></div>
+        <div class="sheet-foot">
+          ${s ? '<button type="button" class="btn danger" data-del>刪除</button>' : ""}
+          <button type="submit" class="btn primary">儲存</button>
+        </div>
+      </form>`;
+  }
+  $("#schedSheet").addEventListener("click", e => {
+    if (e.target.closest("[data-close]")) { closeOverlay(); return; }
+    if (e.target.closest("[data-del]") && editingSid) {
+      if (!confirm("刪除這一項行程？")) return;
+      window.Store.removeSched(editingSid);
+      closeOverlay(); toast("已刪除");
+    }
+  });
+  $("#schedSheet").addEventListener("submit", e => {
+    e.preventDefault();
+    const f = e.target;
+    const v = { date: f.date.value, start: f.start.value || "", end: f.end.value || "", poi_id: f.poi_id.value || "", title: f.title.value.trim(), note: f.note.value.trim() };
+    if (!v.date) { alert("請選日期"); return; }
+    if (!v.poi_id && !v.title) { alert("請選一個地點，或填標題"); return; }
+    const old = editingSid && window.Store.schedule().find(x => x.id === editingSid);
+    if (!old || old.date !== v.date || old.start !== v.start) v.order = orderFor(v.date, v.start, editingSid);
+    if (old) window.Store.patchSched(editingSid, v); else window.Store.addSched(v);
+    closeOverlay();
+    toast("已儲存");
+  });
+
+  /* 匯出到手機行事曆（.ics）：每一項有時間的行程一個事件，鬧鐘＝前一個地點到這裡的交通粗估＋10 分（不知道就 40 分前） */
+  function icsText(s) { return String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n"); }
+  function icsTime(date, time) { return date.replace(/-/g, "") + "T" + time.replace(":", "") + "00"; }
+  function exportIcs() {
+    const all = window.Store.schedule().filter(s => s.date && s.start);
+    if (!all.length) { alert("還沒有排定時間的行程。"); return; }
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+    const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//trip-planner//schedule//ZH", "CALSCALE:GREGORIAN",
+      "BEGIN:VTIMEZONE", "TZID:Asia/Tokyo", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0900", "TZOFFSETTO:+0900", "TZNAME:JST", "END:STANDARD", "END:VTIMEZONE"];
+    all.forEach(s => {
+      const p = schedPlace(s);
+      const before = daySorted(s.date).filter(x => (x.order || 0) < (s.order || 0)).reverse().map(schedPlace).find(x => x && x.coord);
+      const travel = p && p.coord && before ? L_.travelMinutes(before.coord, p.coord) : null;
+      const lead = travel != null ? travel + LEAD_BUFFER : 40;
+      const startAt = schedAt(s, "start"), endAt = schedAt(s, "end") || new Date(startAt.getTime() + 60 * 60000);
+      lines.push("BEGIN:VEVENT", "UID:" + s.id + "@trip-planner", "DTSTAMP:" + stamp,
+        "DTSTART;TZID=Asia/Tokyo:" + icsTime(s.date, s.start), "DTEND;TZID=Asia/Tokyo:" + icsTime(ymd(endAt), hm(endAt)),
+        "SUMMARY:" + icsText(schedName(s)));
+      if (p && p.address) lines.push("LOCATION:" + icsText(p.address));
+      lines.push("DESCRIPTION:" + icsText([s.note, p && p.cautions ? "注意：" + p.cautions : "", p ? "導航：" + L_.navUrl(p) : ""].filter(Boolean).join("\n")),
+        "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT" + lead + "M", "DESCRIPTION:" + icsText("該出發了：" + schedName(s)), "END:VALARM", "END:VEVENT");
+    });
+    lines.push("END:VCALENDAR");
+    saveFile(lines.join("\r\n"), `${tripCfg().name.replace(/[\/\s]/g, "_")}_排程.ics`, "text/calendar");
+  }
+  async function saveFile(text, filename, type) {
+    try {
+      const file = new File([text], filename, { type });
+      if (platform() !== "desktop" && navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: filename }); return; }
+    } catch (e) { if (e && e.name === "AbortError") return; }
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement("a"); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast("已匯出 " + filename);
+  }
+
   /* ---------------- 更多 ---------------- */
   let installEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (state.tab === "more") renderMore(); });
@@ -1016,8 +1320,8 @@
   function switchTab(tab) {
     state.tab = tab; persistUi();
     document.querySelectorAll(".bottom-nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-    ["map", "list", "more"].forEach(t => $("#" + t + "View").classList.toggle("active", t === tab));
-    $("#quickRow").hidden = tab === "more";
+    ["map", "list", "schedule", "more"].forEach(t => $("#" + t + "View").classList.toggle("active", t === tab));
+    $("#quickRow").hidden = tab === "more" || tab === "schedule";
     render();
     if (tab === "map" && map) setTimeout(() => map.invalidateSize(), 30);
   }
@@ -1037,6 +1341,8 @@
       if (state.tab === "map") renderMap();
       if (state.tab === "list") renderList();
       if (state.tab === "more") renderMore();
+      if (state.tab === "schedule") renderSchedule();
+      renderRemind();
       if (overlay === "detail") renderDetail();
       const st = window.Store.status.state;
       $("#loginScreen").hidden = st !== "login";

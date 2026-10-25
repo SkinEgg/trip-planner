@@ -223,11 +223,35 @@
     const q = [item.name_clean || item.name, item.address].filter(Boolean).join(" ");
     return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
   }
+  // 導航：開 Google Maps 路線規劃，起點是手機目前位置；有座標就用座標（最準），沒有就用名稱＋地址
+  function navUrl(item) {
+    const dest = Array.isArray(item.coord) ? item.coord.join(",") : [item.name_clean || item.name, item.address].filter(Boolean).join(" ");
+    return "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(dest);
+  }
+
+  /* 交通時間粗估（分鐘），只用直線距離，給提醒「建議幾點出發」用；實際以 Google Maps 為準。
+     1.5 km 內當步行（繞路係數 1.3、每分鐘 75 m）；更遠當電車（固定 12 分走到車站＋候車，之後每公里約 2.4 分）。
+     東京市區實測：中目黒→代々木公園直線 3.1 km 估 19 分，Google Maps 電車 16 分。 */
+  function travelMinutes(from, to) {
+    if (!from || !to) return null;
+    const d = distanceM(from, to);
+    if (d <= 1500) return Math.max(1, Math.ceil(d * 1.3 / 75));
+    return Math.round(12 + d / 1000 * 2.4);
+  }
+
+  /* 沒有排程時的四個選項 → 對應清單裡的類型 */
+  const SUGGEST = [
+    { id: "shop", label: "購物", icon: "🛍️", test: it => groupOf(it) === "shop" },
+    { id: "meal", label: "用餐", icon: "🍜", test: it => groupOf(it) === "food" && ["正餐", "拉麵", "小吃"].includes(subOf(it)) },
+    { id: "snack", label: "點心", icon: "🍰", test: it => groupOf(it) === "food" && ["咖啡", "茶飲", "甜點", "小吃"].includes(subOf(it)) },
+    { id: "walk-out", label: "散步・戶外", icon: "🌳", test: it => groupOf(it) === "sight" },
+    { id: "walk-in", label: "散步・室內", icon: "🏬", test: it => subOf(it) === "百貨商場" }
+  ];
 
   window.Logic = {
     round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore, goalList, expTotal,
     GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, regionGroup, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
-    closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl
+    closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
   };
 })();
