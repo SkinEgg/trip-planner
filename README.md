@@ -39,6 +39,7 @@ supabase/02_匯入資料.sql                   ⚠️ 匯入 82 筆候選（含�
 supabase/03–07_*.sql                      圖片、地區三層、座標、私人圖片空間等更新（都已執行）
 supabase/08_旅程分開.sql                   建立旅程與旅程清單，把旅程設定搬出地點資料庫（已執行）
 supabase/09_旅程分開_第二段.sql             從地點資料庫移除旅程欄位、整理備註（已執行）
+supabase/10_排程草案.sql                   排程草案資料表 schedule_items、旅程起訖日期（已執行；骨架初始資料含姓名，另外執行不入 repo）
 tools/serve.ps1                           本機測試用伺服器
 .gitignore                                排除上面兩個 ⚠️ 檔案，不會被提交到 GitHub
 ```
@@ -89,6 +90,7 @@ powershell -ExecutionPolicy Bypass -File tools\serve.ps1
 - 雲端資料（2026-10-19 起分三個表）：
   - `public.pois`：地點資料庫，所有旅程共用。欄位 `id`、`data`（jsonb，內容依 schema.json）、`version`（每次更新自動 +1）；`trip` 只記錄最早加入的旅程。
   - `public.trips`：旅程，`id`、`name`（例：2026/11 東京）、`dest`、`ym`、`center`、`zoom`。
+  - `public.schedule_items`：排程草案，`id`、`trip_id`，`data` 為 date、start、end、poi_id、title、note、order。
   - `public.trip_pois`：旅程清單，`trip_id`＋`poi_id`，`data` 只放旅程設定（expectation、goals、must_go、archived、archive_date、archive_reason、status）。
   App 寫入時只合併改了的欄位，並比對 version，避免互相覆蓋。
 - 期待度、目標、必去、封存、地區、類型、標籤是使用者的判斷，AI 不代填。

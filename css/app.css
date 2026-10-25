@@ -288,3 +288,31 @@ details.more[open] summary::after { content: " ▴"; }
 .note-box.mine { background: var(--teal-soft); color: var(--ink); border-left: 4px solid var(--teal); }
 .note-box.mine b { color: var(--teal); }
 .badge.b-note { background: var(--mid-soft); color: var(--mid); }
+
+/* 排程草案、出發提醒、沒有排程時的建議 */
+.remind-bar { display: flex; flex-direction: column; gap: 1px; width: calc(100% - 24px); margin: 2px 12px 8px; padding: 7px 12px; border: 0; border-radius: 10px; background: var(--teal-soft); color: var(--ink); text-align: left; font-size: 13px; line-height: 1.45; cursor: pointer; }
+.remind-bar b { font-size: 14px; color: var(--teal); }
+.remind-bar.urgent { background: var(--accent-soft); }
+.remind-bar.urgent b { color: var(--accent); }
+#scheduleView { overflow-y: auto; padding: 12px 12px 24px; }
+.now-card p { margin: 6px 0; line-height: 1.6; }
+.free-q { font-weight: 800; }
+.suggest-chips { margin: 6px 0 4px; }
+.suggest-list { margin-top: 6px; }
+.sg-row, .sched-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--soft); cursor: pointer; }
+.sg-row .card-main, .sched-row .card-main { flex: 1; min-width: 0; }
+.sched-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.sched-tools .btn { flex: 1 1 auto; }
+.day { margin-top: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px; }
+.day.today { border-color: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); }
+.day-head { font-weight: 800; font-size: 15px; padding: 8px 0 4px; display: flex; align-items: center; gap: 8px; }
+.sched-row:last-child { border-bottom: 0; }
+.sched-time { width: 54px; flex-shrink: 0; font-weight: 800; font-size: 15px; color: var(--teal); line-height: 1.2; }
+.sched-time small { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.sched-empty { padding: 8px 0 12px; }
+.time-row { display: flex; align-items: center; gap: 6px; }
+.time-row input { flex: 1; min-width: 0; }
+@media (min-width: 900px) {
+  #scheduleView > * { max-width: 760px; }
+  #schedSheet { left: 50%; right: auto; width: 520px; margin-left: -260px; }
+}
