@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.10.25";
+  const APP_VERSION = "2026.10.25.2";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -35,6 +35,9 @@
     const t = all.find(x => x.id === state.trip) || all[0] || { id: state.trip, name: "旅行決策" };
     return Object.assign({}, t, Array.isArray(t.center) ? {} : JAPAN, { zoom: Array.isArray(t.center) ? (t.zoom || 12) : JAPAN.zoom });
   }
+
+  // 這個旅程的住宿據點（trips.base）；沒有座標的據點只顯示文字，不畫在地圖上
+  function tripBase() { const b = tripCfg().base; return b && b.name ? b : null; }
 
   /* ---------------- 共用小工具 ---------------- */
   let toastTimer = null;
@@ -312,6 +315,13 @@
   function renderMap() {
     ensureMap();
     markerLayer.clearLayers();
+    const base = tripBase();
+    if (base && Array.isArray(base.coord)) {
+      // 住宿據點：固定顯示，不受篩選影響
+      const icon = L.divIcon({ html: '<div class="pin base-pin">🏠</div>', className: "", iconSize: [30, 30], iconAnchor: [15, 15] });
+      L.marker(base.coord, { icon, title: "住宿：" + base.name, zIndexOffset: 700, keyboard: false }).addTo(markerLayer)
+        .bindPopup(`<div class="ref-popup"><b>🏠 住宿：${esc(base.name)}</b><div class="row"><a href="${esc(L_.navUrl(base))}" target="_blank" rel="noopener">🧭 導航</a>${base.maps_url ? `<a href="${esc(base.maps_url)}" target="_blank" rel="noopener">詳細資料</a>` : ""}</div></div>`, { offset: [0, -8] });
+    }
     const list = filtered();
     const ranks = rankMap(list);
     const withCoord = list.filter(it => Array.isArray(it.coord) && it.coord.length === 2);
@@ -912,6 +922,27 @@
     return `${m}/${d}（${"日一二三四五六"[new Date(y, m - 1, d).getDay()]}）`;
   }
   function schedPlace(s) { return s.poi_id ? getItem(s.poi_id) : null; }
+  // 沒連到地點、標題像「回飯店」的行程，導航到住宿據點
+  const BACK_TO_BASE = /飯店|酒店|旅館|住宿|ホテル|hotel/i;
+  function schedNavTarget(s) {
+    const p = schedPlace(s); if (p) return p;
+    const base = tripBase();
+    return base && !s.poi_id && BACK_TO_BASE.test(s.title || "") ? base : null;
+  }
+  function baseHtml() {
+    const b = tripBase();
+    if (!b) return "";
+    const times = [b.checkin ? "入住 " + b.checkin : "", b.checkout ? "退房 " + b.checkout : ""].filter(Boolean).join("／");
+    const dist = state.me && Array.isArray(b.coord) ? `📍 ${L_.fmtDistance(L_.distanceM(state.me, b.coord))} · 約 ${L_.travelMinutes(state.me, b.coord)} 分` : "";
+    return `<div class="panel base-card">
+      <div class="base-icon">🏠</div>
+      <div class="card-main"><div class="base-label">住宿據點</div>
+        <div class="card-name">${esc(b.name)}</div>
+        ${[b.address, times, dist].filter(Boolean).map(x => `<div class="card-sub">${esc(x)}</div>`).join("")}
+        ${b.maps_url ? `<a class="maps-link" href="${esc(b.maps_url)}" target="_blank" rel="noopener">在 Google Maps 查看詳細資料 ↗</a>` : ""}</div>
+      <a class="go-btn" href="${esc(L_.navUrl(b))}" target="_blank" rel="noopener" title="導航回住宿" data-go>🧭</a>
+    </div>`;
+  }
   function schedName(s) {
     const p = schedPlace(s);
     if (s.title && p) return s.title + "・" + nameOf(p);
@@ -961,13 +992,15 @@
       if (at && at > now && (!best || at < best.startAt)) best = { item: s, startAt: at };
     });
     if (!best) return null;
-    const place = schedPlace(best.item);
+    const place = schedNavTarget(best.item);
     let from = state.me, fromLabel = "目前位置";
     if (!from) {
-      // 還沒有定位：用同一天前一個有地點的行程當起點
+      // 還沒有定位：用同一天前一個有地點的行程當起點；都沒有就從住宿出發
       const before = daySorted(best.item.date).filter(s => s.id !== best.item.id && (s.order || 0) < (best.item.order || 0));
       const prev = before.reverse().map(schedPlace).find(p => p && p.coord);
+      const base = tripBase();
       if (prev) { from = prev.coord; fromLabel = nameOf(prev); }
+      else if (base && Array.isArray(base.coord) && place !== base) { from = base.coord; fromLabel = "住宿"; }
     }
     const travel = place && place.coord && from ? L_.travelMinutes(from, place.coord) : null;
     best.place = place; best.travel = travel; best.fromLabel = fromLabel;
@@ -1061,7 +1094,7 @@
   function renderSchedule() {
     const days = tripDays();
     const today = ymd(new Date());
-    $("#scheduleView").innerHTML = `
+    $("#scheduleView").innerHTML = `${baseHtml()}
       <div class="panel now-card"><h3>現在</h3><div id="nowCard">${nowHtml()}</div></div>
       <div class="sched-tools">
         <button class="btn" data-s="add">＋ 新增行程</button>
@@ -1073,13 +1106,13 @@
         <div class="day ${date === today ? "today" : ""}">
           <div class="day-head">${dayLabel(date)}${date === today ? '<span class="badge b-must">今天</span>' : ""}</div>
           ${daySorted(date).map(s => {
-            const p = schedPlace(s);
+            const p = schedPlace(s), go = schedNavTarget(s);
             const sub = [p ? L_.regionLabel(p) : "", s.note || ""].filter(Boolean).map(esc).join(" · ");
             return `<div class="sched-row" data-sid="${esc(s.id)}">
               <div class="sched-time">${s.start ? esc(s.start) + (s.end ? `<small>–${esc(s.end)}</small>` : "") : "<small>時間未定</small>"}</div>
               <div class="card-main"><div class="card-name">${p && p.must_go ? '<span class="star">★</span>' : ""}${esc(schedName(s))}</div>
                 ${sub ? `<div class="card-sub">${sub}</div>` : ""}</div>
-              ${p ? `<a class="go-btn" href="${esc(L_.navUrl(p))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
+              ${go ? `<a class="go-btn" href="${esc(L_.navUrl(go))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
             </div>`;
           }).join("") || '<div class="small sched-empty">（這天還沒有安排）</div>'}
         </div>`).join("") : '<div class="empty">還沒有排程。按「＋ 新增行程」開始。</div>'}`;
