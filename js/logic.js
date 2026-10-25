@@ -40,6 +40,8 @@
       .map(g => typeof g === "string" ? { name: g } : g)
       .filter(g => g && g.name);
   }
+  // 還沒完成的目標（使用者在目標清單勾選完成的會帶 done: true；完成不影響分數）
+  function openGoals(item) { return goalList(item).filter(g => !g.done); }
   function expTotal(item) {
     const base = typeof item.expectation === "number" ? item.expectation : null;
     const extra = goalList(item).filter(g => typeof g.exp === "number");
@@ -240,6 +242,7 @@
 
   /* 沒有排程時的四個選項 → 對應清單裡的類型 */
   const SUGGEST = [
+    { id: "goal", label: "周遭目標", icon: "🎯", test: it => openGoals(it).length > 0 },
     { id: "shop", label: "購物", icon: "🛍️", test: it => groupOf(it) === "shop" },
     { id: "meal", label: "用餐", icon: "🍜", test: it => groupOf(it) === "food" && ["正餐", "拉麵", "小吃"].includes(subOf(it)) },
     { id: "snack", label: "點心", icon: "🍰", test: it => groupOf(it) === "food" && ["咖啡", "茶飲", "甜點", "小吃"].includes(subOf(it)) },
@@ -248,7 +251,7 @@
   ];
 
   window.Logic = {
-    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore, goalList, expTotal,
+    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore, goalList, openGoals, expTotal,
     GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST

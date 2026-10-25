@@ -298,6 +298,21 @@ details.more[open] summary::after { content: " ▴"; }
 .sched-time small { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .sched-empty { padding: 8px 0 12px; }
 .time-row { display: flex; align-items: center; gap: 6px; }
+/* 目標清單（行程分頁） */
+.goal-panel > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font-size: 15.5px; list-style: none; }
+.goal-panel > summary::-webkit-details-marker { display: none; }
+.goal-panel > summary::before { content: "▸"; color: var(--muted); }
+.goal-panel[open] > summary::before { content: "▾"; }
+.goal-grp { margin-top: 10px; border-top: 1px solid var(--soft); padding-top: 8px; }
+.goal-head { display: flex; align-items: baseline; gap: 8px; }
+.goal-head .goal-name { font-weight: 800; flex: 1; min-width: 0; }
+.goal-name small, .card-goals small { color: var(--teal); font-weight: 800; }
+.goal-grp.all-done .goal-name { color: var(--muted); }
+.goal-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; }
+.goal-item .card-main { flex: 1; min-width: 0; }
+.goal-item.done .card-name { color: var(--muted); text-decoration: line-through; }
+.goal-check { flex-shrink: 0; width: 36px; height: 36px; border: 0; background: none; font-size: 20px; padding: 0; cursor: pointer; }
+
 /* 住宿據點：行程分頁最上方＋地圖上的 🏠 */
 .base-card { display: flex; align-items: center; gap: 12px; border-color: var(--teal); background: var(--teal-soft); }
 .base-card .card-main { flex: 1; min-width: 0; }
