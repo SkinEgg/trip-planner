@@ -92,7 +92,7 @@
     if (f.minExp && !(L_.expTotal(it) != null && L_.expTotal(it) >= +f.minExp)) return false;
     if (f.hideClosed) { const c = L_.closedOn(it, state.date).level; if (c === "closed" || c === "gone") return false; }
     if (state.q) {
-      const hay = L_.norm([it.name, it.name_clean, it.region, it.category, it.address, it.notes, (it.tags || []).join(" "), L_.goalList(it).map(g => g.name).join(" ")].join(" "));
+      const hay = L_.norm([it.name, it.name_clean, it.region, it.category, it.address, it.notes, it.cautions, it.user_notes, (it.tags || []).join(" "), L_.goalList(it).map(g => g.name).join(" ")].join(" "));
       if (!hay.includes(L_.norm(state.q))) return false;
     }
     return true;
@@ -188,6 +188,7 @@
     const d = distOf(it);
     const subs = [esc(L_.regionLabel(it))];
     if (c) subs.push(`<span class="badge ${c.cls}">${esc(c.text)}</span>`);
+    if (it.cautions) subs.push(`<span class="badge b-note" title="${esc(it.cautions)}">⚠️ 注意</span>`);
     if (d != null) subs.push("📍 " + L_.fmtDistance(d));
     if (it.archived) subs.push(`<span class="badge b-arch">封存</span>`);
     return `<div class="card ${c && c.dim ? "dim" : ""}" data-id="${esc(it.id)}">
@@ -584,7 +585,8 @@
         <figcaption><span class="ph-role">${p.role === "ext" ? "外觀" : "代表"}</span>
           ${p.page ? `<a href="${esc(p.page)}" target="_blank" rel="noopener">${esc(p.credit || "來源")}</a>` : esc(p.credit || "")}${p.license ? " · " + esc(p.license) : ""}</figcaption>
       </figure>`).join("")}</div>` : "";
-    const streetView = it.coord ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${it.coord[0]},${it.coord[1]}` : "";
+    // Google Maps 店家詳細資料（評論、照片、營業時間）：有查證時存的地點連結就用它，沒有就用名稱＋地址搜尋
+    const placeUrl = it.maps_url || L_.mapsUrl(it);
     // 類型：大類＋細類兩個選單（存成「大類／細類」）
     const categoryField = item => {
       const { main, sub } = L_.splitCategory(item.category);
@@ -631,12 +633,14 @@
         <div class="kv">
           ${kv("地區", (it.region || "").split("／").join(" › "))}${kv("類型", it.category)}${kv("營業時間", it.hours)}${kv("公休", it.closed)}${kv("地址", it.address)}
         </div>
-        ${streetView ? `<a class="sv-link" href="${streetView}" target="_blank" rel="noopener">👀 看街景（認門口）</a>` : ""}
+        ${it.cautions ? `<div class="note-box caution"><b>⚠️ 注意事項</b>${esc(it.cautions)}</div>` : ""}
+        ${it.user_notes ? `<div class="note-box mine"><b>📝 我的備註</b>${esc(it.user_notes)}</div>` : ""}
+        <a class="sv-link" href="${esc(placeUrl)}" target="_blank" rel="noopener">🗺️ Google Maps 詳細資料（評論、照片、營業時間）</a>
         ${(it.tags || []).length ? `<div class="tags" style="margin-top:10px">${it.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
       </div>
-      <details class="more"><summary>備註與查證來源</summary>
+      <details class="more"><summary>查證筆記與來源</summary>
         <div class="small">
-          ${it.notes ? `<p>📝 ${esc(it.notes)}</p>` : ""}
+          ${it.notes ? `<p>🔎 ${esc(it.notes)}</p>` : ""}
           ${it.gm_note ? `<p>Google：${esc(it.gm_note)}</p>` : ""}
           ${it.tabelog_note ? `<p>Tabelog：${esc(it.tabelog_note)}</p>` : ""}
           ${it.verify ? `<p>驗證：${esc(it.verify)}</p>` : ""}
@@ -650,7 +654,8 @@
         <div class="edit-grid">
           ${field("region", "地區（縣市／區市／車站）")}${categoryField(it)}${field("tags", "標籤（用、分隔）")}
           ${field("hours", "營業時間")}${field("closed", "公休日")}${field("address", "地址")}
-          ${field("verify", "驗證等級")}${field("notes", "備註", true)}
+          ${field("user_notes", "備註（自己加註，例：需排隊）", true)}${field("cautions", "注意事項（只營業特定時段、需預約等）", true)}
+          ${field("verify", "驗證等級")}${field("notes", "查證筆記（AI 查證紀錄）", true)}
         </div>
         <p class="small">改完離開欄位就會儲存。</p>
       </details>
@@ -940,7 +945,7 @@
       category: "", is_food: false, tags: [], goals: [], expectation: null, must_go: false,
       gm_score: null, gm_note: "", gm_tier: null, tabelog_score: null, tabelog_note: "", tabelog_tier: null,
       hours: "", closed: "", verify: "🔴未驗證（新增，尚未查證）", status: "候選（剛新增）", confidence: "",
-      address: "", notes: "", source: "使用者手動新增", coord: null, archived: false
+      address: "", notes: "", cautions: "", user_notes: "", source: "使用者手動新增", coord: null, archived: false
     };
     it.maps_url = L_.mapsUrl(it);
     window.Store.add(it);
