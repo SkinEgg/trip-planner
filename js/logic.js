@@ -114,7 +114,6 @@
     const r = splitRegion(item.region);
     return r.station === NO_STATION ? r.muni + "・" + NO_STATION : r.station;
   }
-  function regionGroup(region) { return splitRegion(region).station; }
 
   function verifyLevel(v) {
     if (!v) return "none";
@@ -250,7 +249,7 @@
 
   window.Logic = {
     round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore, goalList, expTotal,
-    GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, regionGroup, verifyLevel,
+    GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
   };

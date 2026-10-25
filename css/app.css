@@ -188,7 +188,7 @@ a { color: var(--teal); }
 .photo figcaption { font-size: 11.5px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .photo figcaption a { color: var(--muted); }
 .ph-role { display: inline-block; background: var(--soft); border-radius: 6px; padding: 0 6px; margin-right: 4px; font-weight: 700; }
-.sv-link { display: inline-block; margin-top: 10px; font-weight: 700; text-decoration: none; }
+.maps-link { display: inline-block; margin-top: 10px; font-weight: 700; text-decoration: none; }
 .d-actions { display: flex; gap: 8px; margin: 2px 0 12px; }
 .d-block { padding: 12px 0; border-top: 1px solid var(--soft); }
 .d-label { font-size: 12.5px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
@@ -238,16 +238,6 @@ details.more[open] summary::after { content: " ▴"; }
 .ginkgo-inline svg { width: 16px; height: 16px; }
 
 /* ---------- 電腦：篩選固定在左側，詳情在右側 ---------- */
-@media (min-width: 900px) {
-  .sidebar { display: block; width: 290px; flex-shrink: 0; overflow-y: auto; background: var(--card); border-right: 1px solid var(--line); padding: 0 16px 20px; }
-  .sidebar .sheet-head::before, .sidebar .sheet-head .icon-btn, .sidebar .sheet-foot { display: none; }
-  .chip.filter-btn { display: none; }
-  #listView, #moreView { padding: 14px 20px 30px; }
-  #list, .list-tools, .list-count, #moreView > * { max-width: 760px; }
-  .detail-sheet { left: auto; top: 0; width: 430px; max-height: none; border-radius: 0; animation: none; }
-  .detail-sheet .sheet-head::before { display: none; }
-  .peek { left: auto; width: 380px; }
-}
 
 /* 目標（這個地點要去做什麼，可多個） */
 .card-goals { font-size: 12.5px; color: var(--accent); margin-top: 3px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
@@ -276,9 +266,6 @@ details.more[open] summary::after { content: " ▴"; }
 .pick-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--soft); }
 .pick-row .card-main { flex: 1; min-width: 0; }
 .pick-row .btn { flex-shrink: 0; padding: 8px 12px; }
-@media (min-width: 900px) {
-  #tripSheet, #pickSheet { left: 50%; right: auto; width: 520px; margin-left: -260px; }
-}
 
 /* 注意事項（AI 查到的營業限制、需預約）與我的備註（使用者自己加註） */
 .note-box { margin-top: 10px; padding: 9px 12px; border-radius: 10px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
@@ -312,7 +299,17 @@ details.more[open] summary::after { content: " ▴"; }
 .sched-empty { padding: 8px 0 12px; }
 .time-row { display: flex; align-items: center; gap: 6px; }
 .time-row input { flex: 1; min-width: 0; }
+
+/* 電腦版（寬度 900px 以上）：篩選放左側欄、詳情放右側；其他抽屜置中 */
 @media (min-width: 900px) {
+  .sidebar { display: block; width: 290px; flex-shrink: 0; overflow-y: auto; background: var(--card); border-right: 1px solid var(--line); padding: 0 16px 20px; }
+  .sidebar .sheet-head::before, .sidebar .sheet-head .icon-btn, .sidebar .sheet-foot { display: none; }
+  .chip.filter-btn { display: none; }
+  #listView, #moreView { padding: 14px 20px 30px; }
+  #list, .list-tools, .list-count, #moreView > * { max-width: 760px; }
+  .detail-sheet { left: auto; top: 0; width: 430px; max-height: none; border-radius: 0; animation: none; }
+  .detail-sheet .sheet-head::before { display: none; }
+  .peek { left: auto; width: 380px; }
   #scheduleView > * { max-width: 760px; }
-  #schedSheet { left: 50%; right: auto; width: 520px; margin-left: -260px; }
+  #tripSheet, #pickSheet, #schedSheet { left: 50%; right: auto; width: 520px; margin-left: -260px; }
 }

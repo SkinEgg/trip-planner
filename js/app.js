@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "1.0.0";
+  const APP_VERSION = "2026.10.25";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -48,6 +48,39 @@
   function iconHtml(it) { return L_.isGinkgo(it) ? GINKGO_SVG : L_.typeIcon(it); }
   function getItem(id) { return window.Store.items().find(x => x.id === id); }
   function tripItems() { return window.Store.items(); }   // Store 只給目前旅程的清單
+
+  // 日期／時間字串
+  const pad2 = n => String(n).padStart(2, "0");
+  const ymd = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  const hm = d => pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  const fileName = (what, ext) => `${tripCfg().name.replace(/[\/\s]/g, "_")}_${what}_${ymd(new Date())}.${ext}`;
+
+  // 存檔：手機用系統分享（可存到檔案或傳給別的 App），電腦直接下載
+  async function saveFile(text, filename, type) {
+    try {
+      const file = new File([text], filename, { type });
+      if (platform() !== "desktop" && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      }
+    } catch (e) { if (e && e.name === "AbortError") return; }
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement("a"); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast("已匯出 " + filename);
+  }
+
+  // 取得目前位置（只更新 state.me；地圖標記、排序等由呼叫的地方處理）
+  let lastFix = 0;
+  function getPosition(ok, fail) {
+    if (!navigator.geolocation) { if (fail) fail({ code: -1 }); return; }
+    navigator.geolocation.getCurrentPosition(pos => {
+      state.me = [pos.coords.latitude, pos.coords.longitude];
+      lastFix = Date.now();
+      if (ok) ok(pos);
+    }, err => { if (fail) fail(err); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
+  }
 
   function closedInfo(it) {
     const c = L_.closedOn(it, state.date);
@@ -357,9 +390,8 @@
     if (locating) return;
     locating = true;
     toast("取得位置中…");
-    navigator.geolocation.getCurrentPosition(pos => {
+    getPosition(pos => {
       locating = false;
-      state.me = [pos.coords.latitude, pos.coords.longitude];
       ensureMap();
       if (meMarker) { meLayer.removeLayer(meMarker); meLayer.removeLayer(meCircle); }
       meCircle = L.circle(state.me, { radius: pos.coords.accuracy, color: "#2b6cb0", weight: 1, fillOpacity: .08 }).addTo(meLayer);
@@ -372,7 +404,7 @@
       locating = false;
       toast(err.code === 1 ? "沒有定位權限，請在瀏覽器設定允許" : "無法取得位置，請稍後再試");
       if (state.sort === "dist" && !state.me) { state.sort = "rec"; $("#sortSel").value = "rec"; persistUi(); renderList(); }
-    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
+    });
   }
   $("#locateBtn").addEventListener("click", () => locate());
 
@@ -635,7 +667,7 @@
         </div>
         ${it.cautions ? `<div class="note-box caution"><b>⚠️ 注意事項</b>${esc(it.cautions)}</div>` : ""}
         ${it.user_notes ? `<div class="note-box mine"><b>📝 我的備註</b>${esc(it.user_notes)}</div>` : ""}
-        <a class="sv-link" href="${esc(placeUrl)}" target="_blank" rel="noopener">🗺️ Google Maps 詳細資料（評論、照片、營業時間）</a>
+        <a class="maps-link" href="${esc(placeUrl)}" target="_blank" rel="noopener">🗺️ Google Maps 詳細資料（評論、照片、營業時間）</a>
         ${(it.tags || []).length ? `<div class="tags" style="margin-top:10px">${it.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
       </div>
       <details class="more"><summary>查證筆記與來源</summary>
@@ -875,9 +907,6 @@
   const LEAD_BUFFER = 10;          // 出發提醒多留的分鐘數
   const FREE_GAP = 45;             // 下一個行程出發前超過這麼多分鐘，就算「沒有排程」
   const NEAR_M = 3000;             // 建議地點的「附近」範圍（直線公尺）
-  const pad2 = n => String(n).padStart(2, "0");
-  const ymd = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
-  const hm = d => pad2(d.getHours()) + ":" + pad2(d.getMinutes());
   function dayLabel(s) {
     const [y, m, d] = s.split("-").map(Number);
     return `${m}/${d}（${"日一二三四五六"[new Date(y, m - 1, d).getDay()]}）`;
@@ -974,18 +1003,10 @@
   }
   $("#remindBar").addEventListener("click", () => switchTab("schedule"));
   // App 開著時，每 30 秒更新提醒；開了提醒就每 3 分鐘悄悄更新一次位置（交通時間才準）
-  let lastQuietLocate = 0;
-  function quietLocate(cb) {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(pos => {
-      state.me = [pos.coords.latitude, pos.coords.longitude];
-      lastQuietLocate = Date.now();
-      if (cb) cb();
-    }, () => { if (cb) cb(); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
-  }
+  const quietLocate = cb => getPosition(cb, cb);
   setInterval(() => {
     if (document.hidden) return;
-    if (remindOn() && Date.now() - lastQuietLocate > 3 * 60000) quietLocate(renderRemind);
+    if (remindOn() && Date.now() - lastFix > 3 * 60000) quietLocate(renderRemind);
     renderRemind();
     if (state.tab === "schedule" && !overlay) renderNow();
   }, 30000);
@@ -1158,18 +1179,7 @@
         "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT" + lead + "M", "DESCRIPTION:" + icsText("該出發了：" + schedName(s)), "END:VALARM", "END:VEVENT");
     });
     lines.push("END:VCALENDAR");
-    saveFile(lines.join("\r\n"), `${tripCfg().name.replace(/[\/\s]/g, "_")}_排程.ics`, "text/calendar");
-  }
-  async function saveFile(text, filename, type) {
-    try {
-      const file = new File([text], filename, { type });
-      if (platform() !== "desktop" && navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: filename }); return; }
-    } catch (e) { if (e && e.name === "AbortError") return; }
-    const url = URL.createObjectURL(new Blob([text], { type }));
-    const a = document.createElement("a"); a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-    toast("已匯出 " + filename);
+    saveFile(lines.join("\r\n"), fileName("排程", "ics"), "text/calendar");
   }
 
   /* ---------------- 更多 ---------------- */
@@ -1261,21 +1271,7 @@
     const items = tripItems().map(x => { const o = Object.assign({}, x); delete o._v; return o; });
     const payload = { exported_at: new Date().toISOString(), tool_version: "app-" + APP_VERSION, trip: state.trip,
       note: "旅行決策 App 匯出資料。欄位依 Claude outputs/schema.json。", items };
-    const text = JSON.stringify(payload, null, 1);
-    const d = new Date();
-    const filename = `${tripCfg().name.replace(/[\/\s]/g, "_")}_候選資料_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}.json`;
-    try {
-      const file = new File([text], filename, { type: "application/json" });
-      if (platform() !== "desktop" && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: filename });
-        return;
-      }
-    } catch (e) { if (e && e.name === "AbortError") return; }
-    const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
-    const a = document.createElement("a"); a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-    toast("已匯出 " + items.length + " 筆");
+    await saveFile(JSON.stringify(payload, null, 1), fileName("候選資料", "json"), "application/json");
   }
 
   function importJson(file) {

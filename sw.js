@@ -14,7 +14,7 @@ const SHELL = [
   "css/app.css", "js/config.js", "js/logic.js", "js/store.js", "js/app.js",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"
 ];
-// 只有本機模式才有；上線版（雲端模式）不上傳這個檔，所以抓不到也沒關係
+// 地點圖片清單（線上版也有）；抓不到也不影響 App 啟動
 const OPTIONAL = ["data/photos.js"];
 const LIBS = [
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css",
