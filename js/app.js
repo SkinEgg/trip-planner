@@ -585,7 +585,8 @@
         <figcaption><span class="ph-role">${p.role === "ext" ? "外觀" : "代表"}</span>
           ${p.page ? `<a href="${esc(p.page)}" target="_blank" rel="noopener">${esc(p.credit || "來源")}</a>` : esc(p.credit || "")}${p.license ? " · " + esc(p.license) : ""}</figcaption>
       </figure>`).join("")}</div>` : "";
-    const streetView = it.coord ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${it.coord[0]},${it.coord[1]}` : "";
+    // Google Maps 店家詳細資料（評論、照片、營業時間）：有查證時存的地點連結就用它，沒有就用名稱＋地址搜尋
+    const placeUrl = it.maps_url || L_.mapsUrl(it);
     // 類型：大類＋細類兩個選單（存成「大類／細類」）
     const categoryField = item => {
       const { main, sub } = L_.splitCategory(item.category);
@@ -634,7 +635,7 @@
         </div>
         ${it.cautions ? `<div class="note-box caution"><b>⚠️ 注意事項</b>${esc(it.cautions)}</div>` : ""}
         ${it.user_notes ? `<div class="note-box mine"><b>📝 我的備註</b>${esc(it.user_notes)}</div>` : ""}
-        ${streetView ? `<a class="sv-link" href="${streetView}" target="_blank" rel="noopener">👀 看街景（認門口）</a>` : ""}
+        <a class="sv-link" href="${esc(placeUrl)}" target="_blank" rel="noopener">🗺️ Google Maps 詳細資料（評論、照片、營業時間）</a>
         ${(it.tags || []).length ? `<div class="tags" style="margin-top:10px">${it.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
       </div>
       <details class="more"><summary>查證筆記與來源</summary>
