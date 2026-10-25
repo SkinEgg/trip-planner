@@ -26,7 +26,7 @@
 
   let places = new Map();   // id → 地點資料（含 _v 版本）
   let plans = new Map();    // "旅程|地點" → { trip, poi, data, _v }
-  let trips = [];           // [{ id, name, dest, ym, center, zoom, start_date, end_date }]
+  let trips = [];           // [{ id, name, dest, ym, center, zoom, start_date, end_date, base }]；base＝住宿據點 { name, address, coord, maps_url, checkin, checkout }
   let sched = new Map();    // 排程草案：id → { id, trip, data, _v }
   let curTrip = CFG.defaultTrip;
   let items = [];           // 目前旅程的清單（合併後）
@@ -104,7 +104,7 @@
   }
   const placeFromRow = r => Object.assign({}, r.data, { id: r.id, _v: r.version });
   const planFromRow = r => ({ trip: r.trip_id, poi: r.poi_id, data: r.data || {}, _v: r.version });
-  const tripFromRow = r => ({ id: r.id, name: r.name, dest: r.dest, ym: r.ym, center: r.center, zoom: r.zoom, start_date: r.start_date, end_date: r.end_date });
+  const tripFromRow = r => ({ id: r.id, name: r.name, dest: r.dest, ym: r.ym, center: r.center, zoom: r.zoom, start_date: r.start_date, end_date: r.end_date, base: r.base || null });
   const schedFromRow = r => ({ id: r.id, trip: r.trip_id, data: r.data || {}, _v: r.version });
 
   // 排隊中的修改疊在伺服器資料上，畫面才不會「跳回去」
@@ -187,7 +187,7 @@
     const [rp, rt, rr, rs] = await Promise.all([
       client.from("pois").select("id,data,version").limit(10000),
       client.from("trip_pois").select("trip_id,poi_id,data,version").limit(20000),
-      client.from("trips").select("id,name,dest,ym,center,zoom,start_date,end_date").order("ym"),
+      client.from("trips").select("id,name,dest,ym,center,zoom,start_date,end_date,base").order("ym"),
       client.from("schedule_items").select("id,trip_id,data,version").limit(5000)
     ]);
     const error = rp.error || rt.error || rr.error || rs.error;

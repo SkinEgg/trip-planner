@@ -298,6 +298,13 @@ details.more[open] summary::after { content: " ▴"; }
 .sched-time small { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .sched-empty { padding: 8px 0 12px; }
 .time-row { display: flex; align-items: center; gap: 6px; }
+/* 住宿據點：行程分頁最上方＋地圖上的 🏠 */
+.base-card { display: flex; align-items: center; gap: 12px; border-color: var(--teal); background: var(--teal-soft); }
+.base-card .card-main { flex: 1; min-width: 0; }
+.base-icon { font-size: 26px; flex-shrink: 0; }
+.base-label { font-size: 12px; font-weight: 800; color: var(--teal); }
+.base-card .maps-link { margin-top: 4px; font-size: 13px; }
+.pin.base-pin { width: 30px; height: 30px; border-radius: 8px; background: #fff; border-color: var(--teal, #1f6f68); font-size: 17px; }
 .time-row input { flex: 1; min-width: 0; }
 
 /* 電腦版（寬度 900px 以上）：篩選放左側欄、詳情放右側；其他抽屜置中 */
