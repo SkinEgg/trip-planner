@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.10.26";
+  const APP_VERSION = "2026.10.26.2";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -922,13 +922,20 @@
     return `${m}/${d}（${"日一二三四五六"[new Date(y, m - 1, d).getDay()]}）`;
   }
   function schedPlace(s) { return s.poi_id ? getItem(s.poi_id) : null; }
-  // 沒連到地點、標題像「回飯店」的行程，導航到住宿據點
+  // 行程的目的地：清單地點 → 住宿（base: true）→ 自訂地點（dest，例：機場）→ 標題像「回飯店」的也導航回住宿
   const BACK_TO_BASE = /飯店|酒店|旅館|住宿|ホテル|hotel/i;
   function schedNavTarget(s) {
     const p = schedPlace(s); if (p) return p;
     const base = tripBase();
+    if (s.base && base) return base;
+    if (s.dest && s.dest.name) return s.dest;
     return base && !s.poi_id && BACK_TO_BASE.test(s.title || "") ? base : null;
   }
+  // 時區：排程時間預設是日本時間；在台灣的項目（例：去程報到）存 tz: "Asia/Taipei"，跨時區的班機抵達時間用 end_tz
+  const TZ_OFFSET = { "Asia/Tokyo": 9, "Asia/Taipei": 8 };
+  const TZ_LABEL = { "Asia/Taipei": "台灣時間", "Asia/Tokyo": "日本時間" };
+  const DEFAULT_TZ = "Asia/Tokyo";
+  const schedTz = (s, key) => (key === "end" && s.end_tz) || s.tz || DEFAULT_TZ;
   function baseHtml() {
     const b = tripBase();
     if (!b) return "";
@@ -951,7 +958,9 @@
   function schedAt(s, key) {
     if (!s.date || !s[key]) return null;
     const [y, m, d] = s.date.split("-").map(Number), [h, mi] = s[key].split(":").map(Number);
-    return new Date(y, m - 1, d, h, mi);
+    // 依該項目的時區換算成絕對時間，手機在台灣或日本都準
+    const off = TZ_OFFSET[schedTz(s, key)] ?? 9;
+    return new Date(Date.UTC(y, m - 1, d, h - off, mi));
   }
   function tripDays() {
     const t = tripCfg(), set = new Set(window.Store.schedule().map(s => s.date).filter(Boolean));
@@ -997,7 +1006,7 @@
     if (!from) {
       // 還沒有定位：用同一天前一個有地點的行程當起點；都沒有就從住宿出發
       const before = daySorted(best.item.date).filter(s => s.id !== best.item.id && (s.order || 0) < (best.item.order || 0));
-      const prev = before.reverse().map(schedPlace).find(p => p && p.coord);
+      const prev = before.reverse().map(schedNavTarget).find(p => p && p.coord);
       const base = tripBase();
       if (prev) { from = prev.coord; fromLabel = nameOf(prev); }
       else if (base && Array.isArray(base.coord) && place !== base) { from = base.coord; fromLabel = "住宿"; }
@@ -1156,7 +1165,9 @@
           <div class="day-head">${dayLabel(date)}${date === today ? '<span class="badge b-must">今天</span>' : ""}</div>
           ${daySorted(date).map(s => {
             const p = schedPlace(s), go = schedNavTarget(s);
-            const sub = [p ? L_.regionLabel(p) : "", s.note || ""].filter(Boolean).map(esc).join(" · ");
+            const where = p ? L_.regionLabel(p) : go ? (go === tripBase() ? "🏠 " : "📍 ") + go.name : "";
+            const tzNote = s.tz && s.tz !== DEFAULT_TZ ? TZ_LABEL[s.tz] || s.tz : "";
+            const sub = [where, tzNote, s.note || ""].filter(Boolean).map(esc).join(" · ");
             return `<div class="sched-row" data-sid="${esc(s.id)}">
               <div class="sched-time">${s.start ? esc(s.start) + (s.end ? `<small>–${esc(s.end)}</small>` : "") : "<small>時間未定</small>"}</div>
               <div class="card-main"><div class="card-name">${p && p.must_go ? '<span class="star">★</span>' : ""}${esc(schedName(s))}</div>
@@ -1218,14 +1229,19 @@
     const days = tripDays();
     const date = s ? s.date : (days.find(d => d >= ymd(new Date())) || days[0] || ymd(new Date()));
     const places = tripItems().filter(it => !it.archived).sort((a, b) => nameOf(a).localeCompare(nameOf(b), "ja"));
+    const base = tripBase();
     showOverlay("sched");
     $("#schedSheet").innerHTML = `
       <div class="sheet-head"><h2>${s ? "編輯行程" : "新增行程"}</h2><button class="icon-btn" data-close aria-label="關閉">✕</button></div>
       <form id="schedForm" class="edit-grid">
         <div class="field"><label>日期</label><input type="date" name="date" value="${esc(date)}" required></div>
         <div class="field"><label>時間（可空）</label><div class="time-row"><input type="time" name="start" value="${esc(s && s.start || "")}"> ～ <input type="time" name="end" value="${esc(s && s.end || "")}"></div></div>
-        <div class="field"><label>地點（清單裡的）</label><select name="poi_id"><option value="">（不連結地點）</option>
+        <div class="field"><label>目的地</label><select name="poi_id"><option value="">（不連結地點）</option>
+          ${base ? `<option value="__base" ${s && s.base && !s.poi_id ? "selected" : ""}>🏠 住宿：${esc(base.name)}</option>` : ""}
+          ${s && s.dest && s.dest.name ? `<option value="__dest" ${!s.poi_id && !s.base ? "selected" : ""}>📍 ${esc(s.dest.name)}</option>` : ""}
           ${places.map(it => `<option value="${esc(it.id)}" ${s && s.poi_id === it.id ? "selected" : ""}>${esc(nameOf(it))}</option>`).join("")}</select></div>
+        <div class="field"><label>時間是哪裡的時間</label><select name="tz">
+          ${[DEFAULT_TZ, "Asia/Taipei"].map(z => `<option value="${z}" ${((s && s.tz) || DEFAULT_TZ) === z ? "selected" : ""}>${TZ_LABEL[z]}</option>`).join("")}</select></div>
         <div class="field"><label>標題（沒連結地點時必填，例：下飛機）</label><input name="title" value="${esc(s && s.title || "")}"></div>
         <div class="field"><label>備註</label><textarea name="note">${esc(s && s.note || "")}</textarea></div>
         <div class="sheet-foot">
@@ -1245,7 +1261,12 @@
   $("#schedSheet").addEventListener("submit", e => {
     e.preventDefault();
     const f = e.target;
-    const v = { date: f.date.value, start: f.start.value || "", end: f.end.value || "", poi_id: f.poi_id.value || "", title: f.title.value.trim(), note: f.note.value.trim() };
+    const pick = f.poi_id.value || "";
+    const v = { date: f.date.value, start: f.start.value || "", end: f.end.value || "", poi_id: pick.startsWith("__") ? "" : pick, title: f.title.value.trim(), note: f.note.value.trim() };
+    v.base = pick === "__base";
+    if (pick === "") v.dest = null;              // 選「不連結地點」＝連自訂地點也拿掉
+    const tz = f.tz.value || DEFAULT_TZ;
+    v.tz = tz === DEFAULT_TZ ? null : tz;
     if (!v.date) { alert("請選日期"); return; }
     if (!v.poi_id && !v.title) { alert("請選一個地點，或填標題"); return; }
     const old = editingSid && window.Store.schedule().find(x => x.id === editingSid);
@@ -1263,15 +1284,18 @@
     if (!all.length) { alert("還沒有排定時間的行程。"); return; }
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
     const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//trip-planner//schedule//ZH", "CALSCALE:GREGORIAN",
-      "BEGIN:VTIMEZONE", "TZID:Asia/Tokyo", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0900", "TZOFFSETTO:+0900", "TZNAME:JST", "END:STANDARD", "END:VTIMEZONE"];
+      "BEGIN:VTIMEZONE", "TZID:Asia/Tokyo", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0900", "TZOFFSETTO:+0900", "TZNAME:JST", "END:STANDARD", "END:VTIMEZONE",
+      "BEGIN:VTIMEZONE", "TZID:Asia/Taipei", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0800", "TZOFFSETTO:+0800", "TZNAME:CST", "END:STANDARD", "END:VTIMEZONE"];
     all.forEach(s => {
-      const p = schedPlace(s);
-      const before = daySorted(s.date).filter(x => (x.order || 0) < (s.order || 0)).reverse().map(schedPlace).find(x => x && x.coord);
+      const p = schedNavTarget(s);
+      const before = daySorted(s.date).filter(x => (x.order || 0) < (s.order || 0)).reverse().map(schedNavTarget).find(x => x && x.coord);
       const travel = p && p.coord && before ? L_.travelMinutes(before.coord, p.coord) : null;
       const lead = travel != null ? travel + LEAD_BUFFER : 40;
-      const startAt = schedAt(s, "start"), endAt = schedAt(s, "end") || new Date(startAt.getTime() + 60 * 60000);
+      const startAt = schedAt(s, "start"), endAt = schedAt(s, "end");
       lines.push("BEGIN:VEVENT", "UID:" + s.id + "@trip-planner", "DTSTAMP:" + stamp,
-        "DTSTART;TZID=Asia/Tokyo:" + icsTime(s.date, s.start), "DTEND;TZID=Asia/Tokyo:" + icsTime(ymd(endAt), hm(endAt)),
+        `DTSTART;TZID=${schedTz(s, "start")}:` + icsTime(s.date, s.start),
+        // 結束時間：有填就用該時區的時間（跨午夜算隔天）；沒填就 1 小時
+        endAt ? `DTEND;TZID=${schedTz(s, "end")}:` + icsTime(endAt < startAt ? ymd(new Date(Date.parse(s.date + "T00:00:00Z") + 86400000)) : s.date, s.end) : "DURATION:PT1H",
         "SUMMARY:" + icsText(schedName(s)));
       if (p && p.address) lines.push("LOCATION:" + icsText(p.address));
       lines.push("DESCRIPTION:" + icsText([s.note, p && p.cautions ? "注意：" + p.cautions : "", p ? "導航：" + L_.navUrl(p) : ""].filter(Boolean).join("\n")),
