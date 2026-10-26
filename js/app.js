@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.10.25.2";
+  const APP_VERSION = "2026.10.26";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -603,7 +603,7 @@
       ? `<div class="exp-sum">期待度合計 <b>${L_.expTotal(it)}</b> ＝ 原本 ${it.expectation ?? "未填"}${baseGoals.length ? `（${esc(baseGoals.join("、"))}）` : ""}${extraGoals.map(g => ` ＋ ${esc(g.name)} ${g.exp}`).join("")}</div>`
       : "";
     const goalRows = goals.map(g => `<div class="goal-row">
-        <span class="goal">${esc(g.name)}</span>
+        <span class="goal">${g.done ? '<span title="已完成">✅ </span>' : ""}${esc(g.name)}</span>
         <select data-goal-exp="${esc(g.name)}" aria-label="${esc(g.name)} 的期待度">
           <option value="" ${typeof g.exp === "number" ? "" : "selected"}>含在原本期待度</option>
           ${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${g.exp === n ? "selected" : ""}>＋${n}</option>`).join("")}
@@ -757,7 +757,7 @@
       const v = t.value === "" ? null : +t.value;
       const goals = L_.goalList(getItem(state.detail)).map(g => {
         if (g.name !== t.dataset.goalExp) return g;
-        const o = { name: g.name }; if (v != null) o.exp = v; return o;
+        const o = Object.assign({}, g); delete o.exp; if (v != null) o.exp = v; return o;
       });
       t.blur();
       window.Store.patch(state.detail, { goals });
@@ -1079,7 +1079,8 @@
           html += list.length ? (list[0].far ? `<p class="small">3 km 內沒有符合的地點，以下是最近的：</p>` : "") + `<div class="suggest-list">${list.map(({ it, d }) => `<div class="sg-row" data-id="${esc(it.id)}">
               <div class="card-icon">${iconHtml(it)}</div>
               <div class="card-main"><div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
-                <div class="card-sub">${esc(L_.subOf(it) || "")} · 📍 ${L_.fmtDistance(d)} · 約 ${L_.travelMinutes(state.me, it.coord)} 分${it.cautions ? ' · <span class="badge b-note">⚠️ 注意</span>' : ""}</div></div>
+                <div class="card-sub">${esc(L_.subOf(it) || "")} · 📍 ${L_.fmtDistance(d)} · 約 ${L_.travelMinutes(state.me, it.coord)} 分${it.cautions ? ' · <span class="badge b-note">⚠️ 注意</span>' : ""}</div>
+                ${state.suggest === "goal" ? `<div class="card-goals">🎯 ${L_.openGoals(it).map(goalLabel).join("、")}</div>` : ""}</div>
               <a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>
             </div>`).join("")}</div>
             <p class="small">依直線距離排序；已排除今天公休的地點。交通時間是粗估，以 Google Maps 為準。</p>`
@@ -1091,11 +1092,59 @@
   }
   function renderNow() { const el = $("#nowCard"); if (el) el.innerHTML = nowHtml(); }
 
+  /* 目標清單：這個旅程所有地點的目標，依目標名稱分組；可勾選完成（存在旅程清單的 goals[].done，不影響分數） */
+  const goalLabel = g => esc(g.name) + (typeof g.exp === "number" ? `<small> +${g.exp}</small>` : "");
+  function goalGroups() {
+    const groups = new Map();
+    tripItems().filter(it => !it.archived).forEach(it => L_.goalList(it).forEach(g => {
+      if (!groups.has(g.name)) groups.set(g.name, []);
+      groups.get(g.name).push({ it, g });
+    }));
+    const dist = it => state.me && Array.isArray(it.coord) ? L_.distanceM(state.me, it.coord) : null;
+    return [...groups.entries()].map(([name, rows]) => {
+      rows.sort((a, b) => (!!a.g.done - !!b.g.done) || ((dist(a.it) ?? 1e9) - (dist(b.it) ?? 1e9)) || ((L_.expTotal(b.it) ?? 0) - (L_.expTotal(a.it) ?? 0)));
+      const done = rows.filter(r => r.g.done).length;
+      const exp = Math.max(...rows.map(r => typeof r.g.exp === "number" ? r.g.exp : 0));
+      return { name, rows, done, exp };
+    }).sort((a, b) => ((a.done === a.rows.length) - (b.done === b.rows.length)) || (b.exp - a.exp) || a.name.localeCompare(b.name, "zh-Hant"));
+  }
+  function goalsHtml() {
+    const groups = goalGroups();
+    if (!groups.length) return "";
+    const allDone = groups.filter(g => g.done === g.rows.length).length;
+    return `<details class="panel goal-panel" ${state.goalsOpen ? "open" : ""} data-goals>
+      <summary><b>🎯 目標清單</b><span class="small">${groups.length} 個目標・已完成 ${allDone}</span></summary>
+      <p class="small">打勾＝完成（不影響分數）。只要在一個地方完成的目標（例如買圍巾），按「整組完成」。</p>
+      ${groups.map(gr => `<div class="goal-grp ${gr.done === gr.rows.length ? "all-done" : ""}">
+        <div class="goal-head">
+          <span class="goal-name">${gr.done === gr.rows.length ? "✅ " : ""}${esc(gr.name)}${gr.exp ? `<small> +${gr.exp}</small>` : ""}</span>
+          <span class="small">${gr.rows.length > 1 ? `${gr.done}/${gr.rows.length} 處` : ""}</span>
+          ${gr.rows.length > 1 ? `<button class="link-btn" data-gall="${esc(gr.name)}">${gr.done === gr.rows.length ? "取消完成" : "整組完成"}</button>` : ""}
+        </div>
+        ${gr.rows.map(({ it, g }) => `<div class="goal-item ${g.done ? "done" : ""}" data-id="${esc(it.id)}">
+          <button class="goal-check" data-gdone="${esc(g.name)}" aria-label="${g.done ? "取消完成" : "標記完成"}">${g.done ? "✅" : "⬜"}</button>
+          <div class="card-main"><div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
+            <div class="card-sub">${esc(L_.regionLabel(it))}${state.me && Array.isArray(it.coord) ? ` · 📍 ${L_.fmtDistance(L_.distanceM(state.me, it.coord))}` : ""}</div></div>
+          ${Array.isArray(it.coord) || it.address ? `<a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
+        </div>`).join("")}
+      </div>`).join("")}
+    </details>`;
+  }
+  function setGoalDone(id, name, done) {
+    const it = getItem(id); if (!it) return;
+    const goals = L_.goalList(it).map(g => {
+      if (g.name !== name) return g;
+      const o = Object.assign({}, g); if (done) o.done = true; else delete o.done; return o;
+    });
+    window.Store.patch(id, { goals });
+  }
+
   function renderSchedule() {
     const days = tripDays();
     const today = ymd(new Date());
     $("#scheduleView").innerHTML = `${baseHtml()}
       <div class="panel now-card"><h3>現在</h3><div id="nowCard">${nowHtml()}</div></div>
+      ${goalsHtml()}
       <div class="sched-tools">
         <button class="btn" data-s="add">＋ 新增行程</button>
         <button class="btn" data-s="ics">📅 匯出到行事曆</button>
@@ -1119,6 +1168,23 @@
   }
   $("#scheduleView").addEventListener("click", async e => {
     if (e.target.closest("[data-go]")) return;
+    if (e.target.closest("[data-goals] > summary")) { state.goalsOpen = !e.target.closest("[data-goals]").open; return; }
+    const gd = e.target.closest("[data-gdone]");
+    if (gd) {
+      const row = gd.closest("[data-id]"), it = getItem(row.dataset.id);
+      const g = it && L_.goalList(it).find(x => x.name === gd.dataset.gdone);
+      if (g) { setGoalDone(it.id, g.name, !g.done); toast(g.done ? "已取消完成" : "🎯 完成：" + g.name); }
+      return;
+    }
+    const ga = e.target.closest("[data-gall]");
+    if (ga) {
+      const gr = goalGroups().find(x => x.name === ga.dataset.gall); if (!gr) return;
+      const done = gr.done !== gr.rows.length;
+      gr.rows.forEach(r => setGoalDone(r.it.id, gr.name, done));
+      toast(done ? "🎯 整組完成：" + gr.name : "已取消完成：" + gr.name);
+      return;
+    }
+    const gi = e.target.closest(".goal-item"); if (gi) { openDetail(gi.dataset.id); return; }
     const sg = e.target.closest("[data-suggest]");
     if (sg) {
       state.suggest = state.suggest === sg.dataset.suggest ? null : sg.dataset.suggest;
