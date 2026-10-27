@@ -298,6 +298,12 @@ details.more[open] summary::after { content: " ▴"; }
 .sched-time small { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .sched-empty { padding: 8px 0 12px; }
 .time-row { display: flex; align-items: center; gap: 6px; }
+/* 置頂在當天的連結（例：參考文章） */
+.sched-pin { background: var(--teal-soft); margin: 4px -12px 0; padding: 9px 12px; border-bottom: 0; border-radius: 10px; }
+.sched-pin .sched-time { font-size: 18px; }
+.sched-link { display: inline-block; margin-top: 3px; font-size: 13px; font-weight: 700; color: var(--teal); text-decoration: none; }
+.check-row { display: flex; align-items: center; gap: 8px; font-size: 14.5px; padding: 4px 0; cursor: pointer; }
+.check-row input { width: 20px; height: 20px; }
 /* 目標清單（行程分頁） */
 .goal-panel > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font-size: 15.5px; list-style: none; }
 .goal-panel > summary::-webkit-details-marker { display: none; }

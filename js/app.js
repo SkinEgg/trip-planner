@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.10.26.2";
+  const APP_VERSION = "2026.10.26.3";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -1163,7 +1163,13 @@
       ${days.length ? days.map(date => `
         <div class="day ${date === today ? "today" : ""}">
           <div class="day-head">${dayLabel(date)}${date === today ? '<span class="badge b-must">今天</span>' : ""}</div>
-          ${daySorted(date).map(s => {
+          ${daySorted(date).filter(s => s.pin).map(s => `<div class="sched-row sched-pin" data-sid="${esc(s.id)}">
+              <div class="sched-time">📌</div>
+              <div class="card-main"><div class="card-name">${esc(s.title || s.url || "（置頂）")}</div>
+                ${s.note ? `<div class="card-sub">${esc(s.note)}</div>` : ""}</div>
+              ${s.url ? `<a class="go-btn" href="${esc(s.url)}" target="_blank" rel="noopener" title="打開連結" data-go>↗</a>` : ""}
+            </div>`).join("")}
+          ${daySorted(date).filter(s => !s.pin).map(s => {
             const p = schedPlace(s), go = schedNavTarget(s);
             const where = p ? L_.regionLabel(p) : go ? (go === tripBase() ? "🏠 " : "📍 ") + go.name : "";
             const tzNote = s.tz && s.tz !== DEFAULT_TZ ? TZ_LABEL[s.tz] || s.tz : "";
@@ -1171,10 +1177,11 @@
             return `<div class="sched-row" data-sid="${esc(s.id)}">
               <div class="sched-time">${s.start ? esc(s.start) + (s.end ? `<small>–${esc(s.end)}</small>` : "") : "<small>時間未定</small>"}</div>
               <div class="card-main"><div class="card-name">${p && p.must_go ? '<span class="star">★</span>' : ""}${esc(schedName(s))}</div>
-                ${sub ? `<div class="card-sub">${sub}</div>` : ""}</div>
+                ${sub ? `<div class="card-sub">${sub}</div>` : ""}
+                ${s.url ? `<a class="sched-link" href="${esc(s.url)}" target="_blank" rel="noopener" data-go>🔗 打開連結</a>` : ""}</div>
               ${go ? `<a class="go-btn" href="${esc(L_.navUrl(go))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
             </div>`;
-          }).join("") || '<div class="small sched-empty">（這天還沒有安排）</div>'}
+          }).join("") || (daySorted(date).some(s => s.pin) ? "" : '<div class="small sched-empty">（這天還沒有安排）</div>')}
         </div>`).join("") : '<div class="empty">還沒有排程。按「＋ 新增行程」開始。</div>'}`;
   }
   $("#scheduleView").addEventListener("click", async e => {
@@ -1244,6 +1251,8 @@
           ${[DEFAULT_TZ, "Asia/Taipei"].map(z => `<option value="${z}" ${((s && s.tz) || DEFAULT_TZ) === z ? "selected" : ""}>${TZ_LABEL[z]}</option>`).join("")}</select></div>
         <div class="field"><label>標題（沒連結地點時必填，例：下飛機）</label><input name="title" value="${esc(s && s.title || "")}"></div>
         <div class="field"><label>備註</label><textarea name="note">${esc(s && s.note || "")}</textarea></div>
+        <div class="field"><label>連結（可空，例：參考文章）</label><input name="url" type="url" inputmode="url" value="${esc(s && s.url || "")}" placeholder="https://"></div>
+        <label class="check-row"><input type="checkbox" name="pin" ${s && s.pin ? "checked" : ""}> 📌 置頂在當天最上面</label>
         <div class="sheet-foot">
           ${s ? '<button type="button" class="btn danger" data-del>刪除</button>' : ""}
           <button type="submit" class="btn primary">儲存</button>
@@ -1267,8 +1276,11 @@
     if (pick === "") v.dest = null;              // 選「不連結地點」＝連自訂地點也拿掉
     const tz = f.tz.value || DEFAULT_TZ;
     v.tz = tz === DEFAULT_TZ ? null : tz;
+    v.url = f.url.value.trim();
+    if (v.url && !/^https?:\/\//i.test(v.url)) v.url = "https://" + v.url;
+    v.pin = f.pin.checked;
     if (!v.date) { alert("請選日期"); return; }
-    if (!v.poi_id && !v.title) { alert("請選一個地點，或填標題"); return; }
+    if (!v.poi_id && !v.title && !(v.pin && v.url)) { alert("請選一個地點，或填標題"); return; }
     const old = editingSid && window.Store.schedule().find(x => x.id === editingSid);
     if (!old || old.date !== v.date || old.start !== v.start) v.order = orderFor(v.date, v.start, editingSid);
     if (old) window.Store.patchSched(editingSid, v); else window.Store.addSched(v);
