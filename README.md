@@ -24,6 +24,7 @@
 | 旅程 | 只有東京 | 依「年月＋目的地」分旅程，各有一份清單；地點資料庫共用，可從資料庫加入舊地點 |
 | 目標與期待度 | 只有期待度 1–5 | 每個地點可有多個目標，追加目標各自加分；已預約＝必去＋5 |
 | 注意事項／我的備註 | 無 | 詳情頁黃框（查到的營業限制、需預約）、綠框（使用者自己加註） |
+| 旅遊工具清單 | 無 | 下方「🧰 工具」分頁：存放旅遊會用到的 App、網站與說明（例：日本退稅新制），附下載連結，所有旅程共用，可新增、編輯 |
 | 目標清單 | 無 | 行程分頁「🎯 目標清單」：所有目標依名稱分組，可勾選完成或整組完成（不影響分數）；建議多一個「🎯 周遭目標」，列出 3 km 內還沒完成目標的地點 |
 | 住宿據點 | 無 | 每個旅程可設定住宿：行程分頁最上方置頂（地址、入住／退房、一鍵導航），地圖上顯示 🏠；標題像「回飯店」的行程也能導航回住宿 |
 | 排程草案（📅 行程） | 無 | 每日安排；出發提醒（App 開著時，依位置粗估交通時間）；匯出 .ics 到手機行事曆（背景也會響）；沒有排程時依「購物／用餐／點心／散步」建議 3 km 內的清單地點 |
@@ -48,6 +49,7 @@ supabase/08_旅程分開.sql                   建立旅程與旅程清單，把
 supabase/09_旅程分開_第二段.sql             從地點資料庫移除旅程欄位、整理備註（已執行）
 supabase/10_排程草案.sql                   排程草案資料表 schedule_items、旅程起訖日期（已執行；骨架初始資料含姓名，另外執行不入 repo）
 supabase/11_住宿據點.sql                   旅程的住宿據點欄位 trips.base（已執行；實際住宿資料另外執行不入 repo）
+supabase/12_旅遊工具清單.sql               旅遊工具清單資料表 tools（已執行）
 tools/serve.ps1                           本機測試用伺服器
 .gitignore                                排除上面兩個 ⚠️ 檔案，不會被提交到 GitHub
 ```
@@ -99,6 +101,7 @@ powershell -ExecutionPolicy Bypass -File tools\serve.ps1
   - `public.pois`：地點資料庫，所有旅程共用。欄位 `id`、`data`（jsonb，內容依 schema.json）、`version`（每次更新自動 +1）；`trip` 只記錄最早加入的旅程。
   - `public.trips`：旅程，`id`、`name`（例：2026/11 東京）、`dest`、`ym`、`center`、`zoom`、`start_date`、`end_date`、`base`（住宿據點：name、address、coord、maps_url、checkin、checkout）。
   - `public.schedule_items`：排程草案，`id`、`trip_id`，`data` 為 date、start、end、poi_id、title、note、order。
+  - `public.tools`：旅遊工具清單，所有旅程共用，`data` 為 title、category、country、content、links、source、source_url、checked、order。
   - `public.trip_pois`：旅程清單，`trip_id`＋`poi_id`，`data` 只放旅程設定（expectation、goals、must_go、archived、archive_date、archive_reason、status）。
   App 寫入時只合併改了的欄位，並比對 version，避免互相覆蓋。
 - 期待度、目標、必去、封存、地區、類型、標籤是使用者的判斷，AI 不代填。

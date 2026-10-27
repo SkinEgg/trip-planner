@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.10.26.3";
+  const APP_VERSION = "2026.10.27";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -428,14 +428,14 @@
     if (!(history.state && history.state.ov)) history.pushState({ ov: 1 }, "");
   }
   function hideOverlays(keepHistory) {
-    ["filter", "detail", "trip", "pick", "sched"].forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
+    ["filter", "detail", "trip", "pick", "sched", "tool"].forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
     if (overlay === "detail") state.detail = null;
     overlay = null;
     if (!keepHistory && history.state && history.state.ov) history.back();
   }
   function closeOverlay() { if (history.state && history.state.ov) history.back(); else hideOverlays(true); }
   window.addEventListener("popstate", () => { if (overlay) hideOverlays(true); });
-  ["filter", "detail", "trip", "pick", "sched"].forEach(n => $("#" + n + "Backdrop").addEventListener("click", closeOverlay));
+  ["filter", "detail", "trip", "pick", "sched", "tool"].forEach(n => $("#" + n + "Backdrop").addEventListener("click", closeOverlay));
   document.addEventListener("keydown", e => { if (e.key === "Escape" && overlay) closeOverlay(); });
 
   /* ---------------- 篩選 ---------------- */
@@ -1317,6 +1317,83 @@
     saveFile(lines.join("\r\n"), fileName("排程", "ics"), "text/calendar");
   }
 
+  /* ---------------- 旅遊工具清單（所有旅程共用：退稅、交通、翻譯等 App 與說明） ---------------- */
+  // 內文裡的網址變成可以點的連結（先跳脫再轉換）
+  const linkify = text => esc(text || "").replace(/https?:\/\/[^\s<>"'）)]+/g, u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+  const linksToText = links => (links || []).map(l => (l.label ? l.label + "｜" : "") + l.url).join("\n");
+  const textToLinks = text => String(text || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean).map(line => {
+    const i = line.search(/https?:\/\//);
+    if (i < 0) return null;
+    return { label: line.slice(0, i).replace(/[｜|:：\s]+$/, "").trim(), url: line.slice(i).trim() };
+  }).filter(Boolean);
+  let editingTool = null;
+  function renderTools() {
+    const list = window.Store.tools();
+    const open = state.toolOpen || {};
+    $("#toolsView").innerHTML = `
+      <div class="tools-head"><h2>🧰 旅遊工具清單</h2><button class="btn" data-t="add">＋ 新增工具</button></div>
+      <p class="small">旅遊會用到的 App、網站與說明，所有旅程共用。</p>
+      ${list.length ? list.map(t => `<details class="panel tool-card" data-tid="${esc(t.id)}" ${open[t.id] ? "open" : ""}>
+        <summary>
+          <div class="tool-title">${esc(t.title || "（未命名）")}</div>
+          <div class="tool-meta">${[t.category, t.country].filter(Boolean).map(x => `<span class="badge b-tool">${esc(x)}</span>`).join(" ")}${t.checked ? `<span class="small">查證 ${esc(t.checked)}</span>` : ""}</div>
+        </summary>
+        ${(t.links || []).length ? `<div class="tool-links">${t.links.map(l => `<a class="btn tool-link" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || l.url)} ↗</a>`).join("")}</div>` : ""}
+        ${t.content ? `<div class="tool-content">${linkify(t.content)}</div>` : ""}
+        ${t.source ? `<p class="small">來源：${t.source_url ? `<a href="${esc(t.source_url)}" target="_blank" rel="noopener">${esc(t.source)}</a>` : esc(t.source)}</p>` : ""}
+        <div class="tool-foot"><button class="link-btn" data-t="edit">編輯</button></div>
+      </details>`).join("") : '<div class="empty">還沒有工具。按「＋ 新增工具」開始。</div>'}`;
+  }
+  $("#toolsView").addEventListener("click", e => {
+    const sum = e.target.closest(".tool-card > summary");
+    if (sum && !e.target.closest("a")) {
+      const id = sum.parentElement.dataset.tid;
+      state.toolOpen = Object.assign({}, state.toolOpen, { [id]: !sum.parentElement.open });
+      return;
+    }
+    const b = e.target.closest("[data-t]"); if (!b) return;
+    if (b.dataset.t === "add") openToolEdit(null);
+    if (b.dataset.t === "edit") openToolEdit(b.closest("[data-tid]").dataset.tid);
+  });
+  function openToolEdit(id) {
+    editingTool = id;
+    const t = id ? window.Store.tools().find(x => x.id === id) : null;
+    if (id && !t) return;
+    showOverlay("tool");
+    $("#toolSheet").innerHTML = `
+      <div class="sheet-head"><h2>${t ? "編輯工具" : "新增工具"}</h2><button class="icon-btn" data-close aria-label="關閉">✕</button></div>
+      <form id="toolForm" class="edit-grid">
+        <div class="field"><label>名稱</label><input name="title" required value="${esc(t && t.title || "")}" placeholder="例：日本退稅新制"></div>
+        <div class="field"><label>分類（可空，例：退稅、交通、翻譯）</label><input name="category" value="${esc(t && t.category || "")}"></div>
+        <div class="field"><label>國家（可空）</label><input name="country" value="${esc(t && t.country || "")}" placeholder="例：日本"></div>
+        <div class="field"><label>下載／網站連結（每行一個：名稱｜網址）</label><textarea name="links" rows="5" placeholder="Global Blue（iPhone）｜https://apps.apple.com/...">${esc(linksToText(t && t.links))}</textarea></div>
+        <div class="field"><label>內文</label><textarea name="content" rows="10">${esc(t && t.content || "")}</textarea></div>
+        <div class="field"><label>來源（可空）</label><input name="source" value="${esc(t && t.source || "")}"></div>
+        <div class="field"><label>來源網址（可空）</label><input name="source_url" type="url" value="${esc(t && t.source_url || "")}"></div>
+        <div class="sheet-foot">
+          ${t ? '<button type="button" class="btn danger" data-del>刪除</button>' : ""}
+          <button type="submit" class="btn primary">儲存</button>
+        </div>
+      </form>`;
+  }
+  $("#toolSheet").addEventListener("click", e => {
+    if (e.target.closest("[data-close]")) { closeOverlay(); return; }
+    if (e.target.closest("[data-del]") && editingTool) {
+      if (!confirm("刪除這個工具？")) return;
+      window.Store.removeTool(editingTool);
+      closeOverlay(); toast("已刪除");
+    }
+  });
+  $("#toolSheet").addEventListener("submit", e => {
+    e.preventDefault();
+    const f = e.target;
+    const v = { title: f.title.value.trim(), category: f.category.value.trim(), country: f.country.value.trim(),
+      links: textToLinks(f.links.value), content: f.content.value.trim(), source: f.source.value.trim(), source_url: f.source_url.value.trim() };
+    if (!v.title) { alert("請填名稱"); return; }
+    if (editingTool) window.Store.patchTool(editingTool, v); else window.Store.addTool(v);
+    closeOverlay(); toast("已儲存");
+  });
+
   /* ---------------- 更多 ---------------- */
   let installEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; if (state.tab === "more") renderMore(); });
@@ -1451,8 +1528,8 @@
   function switchTab(tab) {
     state.tab = tab; persistUi();
     document.querySelectorAll(".bottom-nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-    ["map", "list", "schedule", "more"].forEach(t => $("#" + t + "View").classList.toggle("active", t === tab));
-    $("#quickRow").hidden = tab === "more" || tab === "schedule";
+    ["map", "list", "schedule", "tools", "more"].forEach(t => $("#" + t + "View").classList.toggle("active", t === tab));
+    $("#quickRow").hidden = tab === "more" || tab === "schedule" || tab === "tools";
     render();
     if (tab === "map" && map) setTimeout(() => map.invalidateSize(), 30);
   }
@@ -1473,6 +1550,7 @@
       if (state.tab === "list") renderList();
       if (state.tab === "more") renderMore();
       if (state.tab === "schedule") renderSchedule();
+      if (state.tab === "tools") renderTools();
       renderRemind();
       if (overlay === "detail") renderDetail();
       const st = window.Store.status.state;

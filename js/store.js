@@ -28,6 +28,7 @@
   let plans = new Map();    // "旅程|地點" → { trip, poi, data, _v }
   let trips = [];           // [{ id, name, dest, ym, center, zoom, start_date, end_date, base }]；base＝住宿據點 { name, address, coord, maps_url, checkin, checkout }
   let sched = new Map();    // 排程草案：id → { id, trip, data, _v }
+  let tools = new Map();    // 旅遊工具清單（所有旅程共用）：id → { id, data, _v }
   let curTrip = CFG.defaultTrip;
   let items = [];           // 目前旅程的清單（合併後）
   let listeners = [];
@@ -77,7 +78,7 @@
     let db = LS.get(K_LOCAL, null);
     if (!db) {
       // 第一次：從 data/seed.js 建立（seed 是舊格式，地點與旅程欄位混在一起）
-      db = { places: [], plans: [], sched: [], trips: (CFG.trips || []).map(t => Object.assign({}, t)) };
+      db = { places: [], plans: [], sched: [], tools: [], trips: (CFG.trips || []).map(t => Object.assign({}, t)) };
       (window.SEED_POIS || []).forEach(x => {
         const { place, plan } = split(x);
         db.places.push(Object.assign({ id: x.id }, place));
@@ -88,10 +89,11 @@
     plans = new Map(db.plans.map(p => [planKey(p.trip, p.poi), p]));
     trips = db.trips || [];
     sched = new Map((db.sched || []).map(s => [s.id, s]));
-    status = { mode: "local", state: "ok", text: "💾 本機模式" };
+    tools = new Map((db.tools || []).map(s => [s.id, s]));
+    status ={ mode: "local", state: "ok", text: "💾 本機模式" };
   }
   function saveLocal() {
-    LS.set(K_LOCAL, { places: [...places.values()], plans: [...plans.values()], sched: [...sched.values()], trips });
+    LS.set(K_LOCAL, { places: [...places.values()], plans: [...plans.values()], sched: [...sched.values()], tools: [...tools.values()], trips });
   }
 
   /* ---------------- 雲端模式 ---------------- */
@@ -106,6 +108,7 @@
   const planFromRow = r => ({ trip: r.trip_id, poi: r.poi_id, data: r.data || {}, _v: r.version });
   const tripFromRow = r => ({ id: r.id, name: r.name, dest: r.dest, ym: r.ym, center: r.center, zoom: r.zoom, start_date: r.start_date, end_date: r.end_date, base: r.base || null });
   const schedFromRow = r => ({ id: r.id, trip: r.trip_id, data: r.data || {}, _v: r.version });
+  const toolFromRow = r => ({ id: r.id, data: r.data || {}, _v: r.version });
 
   // 排隊中的修改疊在伺服器資料上，畫面才不會「跳回去」
   function applyPending() {
@@ -127,10 +130,15 @@
         const cur = sched.get(op.id);
         if (cur) Object.assign(cur.data, op.fields); else if (op.isNew) sched.set(op.id, { id: op.id, trip: op.trip, data: Object.assign({}, op.fields) });
       }
+      if (op.kind === "tool") {
+        if (op.del) { tools.delete(op.id); return; }
+        const cur = tools.get(op.id);
+        if (cur) Object.assign(cur.data, op.fields); else if (op.isNew) tools.set(op.id, { id: op.id, data: Object.assign({}, op.fields) });
+      }
     });
   }
   function saveCache() {
-    LS.set(K_CACHE, { places: [...places.values()], plans: [...plans.values()], sched: [...sched.values()], trips });
+    LS.set(K_CACHE, { places: [...places.values()], plans: [...plans.values()], sched: [...sched.values()], tools: [...tools.values()], trips });
   }
   function loadCache() {
     const c = LS.get(K_CACHE, null);
@@ -139,6 +147,7 @@
     plans = new Map((c.plans || []).map(p => [planKey(p.trip, p.poi), p]));
     trips = c.trips || [];
     sched = new Map((c.sched || []).map(s => [s.id, s]));
+    tools = new Map((c.tools || []).map(s => [s.id, s]));
   }
   // 舊版的待上傳修改（地點與旅程欄位混在一起）轉成新格式
   function migrateOldPending() {
@@ -184,11 +193,12 @@
 
   async function refresh() {
     setStatus("loading", "⏳ 同步中…");
-    const [rp, rt, rr, rs] = await Promise.all([
+    const [rp, rt, rr, rs, ro] = await Promise.all([
       client.from("pois").select("id,data,version").limit(10000),
       client.from("trip_pois").select("trip_id,poi_id,data,version").limit(20000),
       client.from("trips").select("id,name,dest,ym,center,zoom,start_date,end_date,base").order("ym"),
-      client.from("schedule_items").select("id,trip_id,data,version").limit(5000)
+      client.from("schedule_items").select("id,trip_id,data,version").limit(5000),
+      client.from("tools").select("id,data,version").limit(2000)
     ]);
     const error = rp.error || rt.error || rr.error || rs.error;
     if (error) {
@@ -199,6 +209,8 @@
     plans = new Map(rt.data.map(r => { const p = planFromRow(r); return [planKey(p.trip, p.poi), p]; }));
     trips = rr.data.map(tripFromRow);
     sched = new Map(rs.data.map(r => [r.id, schedFromRow(r)]));
+    // 工具清單讀不到（例如資料表還沒建立）時保留上次的資料，不影響其他功能
+    if (ro.error) console.warn(ro.error); else tools = new Map(ro.data.map(r => [r.id, toolFromRow(r)]));
     saveCache();
     applyPending();
     updateSyncedStatus();
@@ -251,6 +263,18 @@
         if (op) Object.assign(s.data, op.fields);
         sched.set(r.id, s); saveCache(); emit();
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "tools" }, payload => {
+        if (payload.eventType === "DELETE") {
+          const o = payload.old || {}; if (o.id) { tools.delete(o.id); saveCache(); emit(); }
+          return;
+        }
+        const r = payload.new; if (!r || !r.id) return;
+        const s = toolFromRow(r);
+        const op = pend()["o:" + r.id];
+        if (op && op.del) return;
+        if (op) Object.assign(s.data, op.fields);
+        tools.set(r.id, s); saveCache(); emit();
+      })
       .subscribe();
   }
   function stopSync() { if (channel) { client.removeChannel(channel); channel = null; } }
@@ -265,14 +289,14 @@
       return true;
     }
     if (op.del) {
-      const q = op.kind === "sched"
-        ? client.from("schedule_items").delete().eq("id", op.id)
+      const q = op.kind === "sched" || op.kind === "tool"
+        ? client.from(op.kind === "tool" ? "tools" : "schedule_items").delete().eq("id", op.id)
         : client.from("trip_pois").delete().eq("trip_id", op.trip).eq("poi_id", op.poi);
       const { error } = await q;
       if (error) throw error;
       return true;
     }
-    const table = { place: "pois", plan: "trip_pois", sched: "schedule_items" }[op.kind];
+    const table = { place: "pois", plan: "trip_pois", sched: "schedule_items", tool: "tools" }[op.kind];
     const match = q => op.kind === "plan" ? q.eq("trip_id", op.trip).eq("poi_id", op.poi) : q.eq("id", op.id);
     for (let attempt = 0; attempt < 4; attempt++) {
       const { data: row, error: e1 } = await match(client.from(table).select("data,version")).maybeSingle();
@@ -280,6 +304,7 @@
       if (!row) {
         const ins = op.kind === "place" ? { id: op.id, trip: op.trip || curTrip, data: Object.assign({ id: op.id }, op.fields) }
           : op.kind === "sched" ? { id: op.id, trip_id: op.trip, data: op.fields }
+          : op.kind === "tool" ? { id: op.id, data: op.fields }
           : { trip_id: op.trip, poi_id: op.poi, data: op.fields };
         const { error: e2 } = await client.from(table).insert(ins);
         if (e2 && e2.code !== "23505") throw e2;   // 23505 = 已存在（別處剛建立），下一輪改用更新
@@ -430,6 +455,31 @@
       const s = sched.get(id); if (!s) return;
       sched.delete(id);
       if (status.mode !== "local") queue("s:" + id, { kind: "sched", id, trip: s.trip, del: true });
+      commit();
+    },
+
+    /* 旅遊工具清單（所有旅程共用）：每筆 { title, category, country, content, links: [{ label, url }], source, source_url, checked, order } */
+    tools() {
+      return [...tools.values()].map(s => Object.assign({ id: s.id }, s.data))
+        .sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || (a.title || "").localeCompare(b.title || "", "zh-Hant"));
+    },
+    addTool(data) {
+      const id = "tool_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      tools.set(id, { id, data: Object.assign({}, data) });
+      if (status.mode !== "local") queue("o:" + id, { kind: "tool", id, fields: Object.assign({}, data), isNew: true });
+      commit();
+      return id;
+    },
+    patchTool(id, fields) {
+      const s = tools.get(id); if (!s) return;
+      Object.assign(s.data, fields);
+      if (status.mode !== "local") queue("o:" + id, { kind: "tool", id, fields });
+      commit();
+    },
+    removeTool(id) {
+      if (!tools.has(id)) return;
+      tools.delete(id);
+      if (status.mode !== "local") queue("o:" + id, { kind: "tool", id, del: true });
       commit();
     },
 

@@ -298,6 +298,24 @@ details.more[open] summary::after { content: " ▴"; }
 .sched-time small { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .sched-empty { padding: 8px 0 12px; }
 .time-row { display: flex; align-items: center; gap: 6px; }
+/* 旅遊工具清單 */
+#toolsView { overflow-y: auto; padding: 12px 12px 24px; }
+.tools-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tools-head h2 { margin: 0; font-size: 18px; }
+.tools-head .btn { flex: 0 0 auto; }
+.tool-card > summary { list-style: none; cursor: pointer; }
+.tool-card > summary::-webkit-details-marker { display: none; }
+.tool-title { font-weight: 800; font-size: 15.5px; }
+.tool-title::before { content: "▸ "; color: var(--muted); }
+.tool-card[open] .tool-title::before { content: "▾ "; }
+.tool-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.badge.b-tool { background: var(--teal-soft); color: var(--teal); }
+.tool-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+.tool-link { flex: 1 1 auto; font-size: 13.5px; text-align: center; text-decoration: none; }
+.tool-content { margin-top: 10px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-content a { color: var(--teal); }
+.tool-foot { text-align: right; margin-top: 6px; }
+
 /* 置頂在當天的連結（例：參考文章） */
 .sched-pin { background: var(--teal-soft); margin: 4px -12px 0; padding: 9px 12px; border-bottom: 0; border-radius: 10px; }
 .sched-pin .sched-time { font-size: 18px; }
