@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.10.27";
+  const APP_VERSION = "2026.10.31";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -48,7 +48,7 @@
   function today() { return new Date(); }
   function dayWord() { return L_.sameDay(state.date, today()) ? "今天" : (state.date.getMonth() + 1) + "/" + state.date.getDate(); }
   function nameOf(it) { return it.name_clean || it.name || "（未命名）"; }
-  function iconHtml(it) { return L_.isGinkgo(it) ? GINKGO_SVG : L_.typeIcon(it); }
+  function iconHtml(it) { return L_.isMatcha(it) ? "🍵" : L_.isGinkgo(it) ? GINKGO_SVG : L_.typeIcon(it); }
   function getItem(id) { return window.Store.items().find(x => x.id === id); }
   function tripItems() { return window.Store.items(); }   // Store 只給目前旅程的清單
 
@@ -302,6 +302,12 @@
     const c = closedInfo(it);
     const dim = c && c.dim ? " dim" : "";
     const must = it.must_go ? '<span class="must">★</span>' : "";
+    if (L_.isMatcha(it)) {
+      // 抹茶：抹茶色大圖示，右下角小圓是分數（餐廳是總分，其他是期待度）
+      const s = scoreInfo(it, ranks);
+      const num = s.num === "—" ? "?" : (it.is_food ? Math.round(s.num) : s.num);
+      return `<div class="pin matcha${sel}${dim}">🍵<span class="mscore t-${s.tier}">${num}</span>${must}</div>`;
+    }
     if (it.is_food) {
       const s = scoreInfo(it, ranks);
       const color = s.tier === "good" ? "#2f8f55" : s.tier === "mid" ? "#c08a1e" : "#8a8072";
@@ -326,8 +332,9 @@
     const ranks = rankMap(list);
     const withCoord = list.filter(it => Array.isArray(it.coord) && it.coord.length === 2);
     withCoord.forEach(it => {
-      const icon = L.divIcon({ html: pinHtml(it, ranks), className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
-      const mk = L.marker(it.coord, { icon, title: nameOf(it), zIndexOffset: it.id === state.sel ? 1000 : (it.must_go ? 500 : 0), keyboard: false }).addTo(markerLayer);
+      const big = L_.isMatcha(it);
+      const icon = L.divIcon({ html: pinHtml(it, ranks), className: "", iconSize: big ? [36, 36] : [28, 28], iconAnchor: big ? [18, 18] : [14, 14] });
+      const mk = L.marker(it.coord, { icon, title: (big ? "🍵 " : "") + nameOf(it), zIndexOffset: it.id === state.sel ? 1000 : (it.must_go ? 500 : big ? 400 : 0), keyboard: false }).addTo(markerLayer);
       mk.on("click", ev => { L.DomEvent.stopPropagation(ev); if (state.sel === it.id) clearSel(); else selectOnMap(it.id, false); });
     });
     if (!fitted && withCoord.length) {

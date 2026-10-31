@@ -134,6 +134,11 @@ a { color: var(--teal); }
 .pin.dim { opacity: .38; }
 .pin.ginkgo { background: #fff6d6 !important; border-color: #e0a800; }
 .pin.ginkgo svg { width: 19px; height: 19px; }
+/* 抹茶：比一般圖示大、抹茶綠底、深綠外框，一眼就能找到 */
+.pin.matcha { width: 36px; height: 36px; background: #8bc34a; border: 3px solid #fff; box-shadow: 0 0 0 2.5px #33691e, 0 2px 6px rgba(0,0,0,.45); font-size: 19px; }
+.pin.matcha .mscore { position: absolute; bottom: -7px; right: -9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; border: 1.5px solid #fff; background: #8a8072; color: #fff; font-size: 11px; font-weight: 800; line-height: 15px; text-align: center; }
+.pin.matcha .mscore.t-good { background: #2f8f55; }
+.pin.matcha .mscore.t-mid { background: #c08a1e; }
 .pin .must { position: absolute; top: -10px; right: -8px; color: #c23b74; font-size: 15px; text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 2px #fff; }
 .pin.sel { transform: scale(1.4); box-shadow: 0 0 0 3px #fff, 0 0 0 6px #b3433f, 0 2px 8px rgba(0,0,0,.45); }
 .pin.sel::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 3px solid #b3433f; animation: pulse 1.6s ease-out infinite; }
