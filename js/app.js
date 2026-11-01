@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.10.31";
+  const APP_VERSION = "2026.11.01";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -685,6 +685,7 @@
         ${it.cautions ? `<div class="note-box caution"><b>⚠️ 注意事項</b>${esc(it.cautions)}</div>` : ""}
         ${it.user_notes ? `<div class="note-box mine"><b>📝 我的備註</b>${esc(it.user_notes)}</div>` : ""}
         <a class="maps-link" href="${esc(placeUrl)}" target="_blank" rel="noopener">🗺️ Google Maps 詳細資料（評論、照片、營業時間）</a>
+        ${(Array.isArray(it.links) ? it.links : []).filter(l => l && /^https?:\/\//.test(l.url || "")).map(l => `<a class="maps-link" href="${esc(l.url)}" target="_blank" rel="noopener">🔗 ${esc(l.label || l.url)} ↗</a>`).join("")}
         ${(it.tags || []).length ? `<div class="tags" style="margin-top:10px">${it.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
       </div>
       <details class="more"><summary>查證筆記與來源</summary>
