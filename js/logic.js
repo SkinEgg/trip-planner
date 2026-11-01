@@ -95,6 +95,8 @@
     for (const [k, v] of TYPE_ICON) if (c.includes(k)) return v;
     return g ? g.icon : "📍";
   }
+  // 目的是抹茶的地點（目標裡有「抹茶」，使用者 2026-10-31 決定）：地圖上用抹茶色的大圖示
+  function isMatcha(item) { return goalList(item).some(g => g.name === "抹茶"); }
   function isGinkgo(item) { return (item.tags || []).some(t => String(t).startsWith("銀杏")); }
 
   /* 地區分三層（使用者 2026-10-15 決定）：「都道府縣／區市／車站」，例如「東京都／台東区／浅草」。
@@ -252,7 +254,7 @@
 
   window.Logic = {
     round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore, goalList, openGoals, expTotal,
-    GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, verifyLevel,
+    GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, isMatcha, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
   };
