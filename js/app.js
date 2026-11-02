@@ -15,6 +15,8 @@
 
   /* ---------------- 狀態 ---------------- */
   const saved = LS.get("tripapp.ui.v1", {});
+  // 篩選的預設值（「全部清除」也回到這裡）
+  const FILTER_DEFAULTS = () => ({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", hideClosed: false, showArchived: false });
   const state = {
     tab: saved.tab || "map",
     trip: saved.trip || CFG.defaultTrip,
@@ -24,7 +26,7 @@
     sel: null,          // 地圖上選取中的地點
     detail: null,       // 詳情開啟中的地點
     me: null,           // 我的位置 [lat, lng]
-    f: Object.assign({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", hideClosed: false, showArchived: false }, saved.v === 2 ? saved.f : {})
+    f: Object.assign(FILTER_DEFAULTS(), saved.v === 2 ? saved.f : {})
   };
   // v: 2 = 地區改三層後的篩選格式；舊版存的篩選條件不沿用
   function persistUi() { LS.set("tripapp.ui.v1", { v: 2, tab: state.tab, trip: state.trip, sort: state.sort, f: state.f }); }
@@ -159,11 +161,11 @@
     if (!!b.must_go !== !!a.must_go) return b.must_go ? 1 : -1;
     const ea = L_.expTotal(a) ?? -1, eb = L_.expTotal(b) ?? -1;
     if (eb !== ea) return eb - ea;
-    const ca = L_.comboScore(a), cb = L_.comboScore(b);
-    if ((cb == null ? -1 : cb) !== (ca == null ? -1 : ca)) return (cb == null ? -1 : cb) - (ca == null ? -1 : ca);
+    const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
+    if (cb !== ca) return cb - ca;
     return nameOf(a).localeCompare(nameOf(b), "ja");
   }
-  function distOf(it) { return state.me && it.coord ? L_.distanceM(state.me, it.coord) : null; }
+  function distOf(it) { return state.me && Array.isArray(it.coord) ? L_.distanceM(state.me, it.coord) : null; }
 
   /* ---------------- 頂部 ---------------- */
   function renderTop() {
@@ -206,8 +208,7 @@
 
   $("#dateBtn").addEventListener("click", () => {
     const inp = $("#dateInput");
-    const d = state.date;
-    inp.value = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    inp.value = ymd(state.date);
     try { inp.showPicker(); } catch (e) { inp.focus(); inp.click(); }
   });
   $("#dateInput").addEventListener("change", e => {
@@ -302,21 +303,14 @@
     const c = closedInfo(it);
     const dim = c && c.dim ? " dim" : "";
     const must = it.must_go ? '<span class="must">★</span>' : "";
-    if (L_.isMatcha(it)) {
-      // 抹茶：抹茶色大圖示，右下角小圓是分數（餐廳是總分，其他是期待度）
-      const s = scoreInfo(it, ranks);
-      const num = s.num === "—" ? "?" : (it.is_food ? Math.round(s.num) : s.num);
-      return `<div class="pin matcha${sel}${dim}">🍵<span class="mscore t-${s.tier}">${num}</span>${must}</div>`;
-    }
-    if (it.is_food) {
-      const s = scoreInfo(it, ranks);
-      const color = s.tier === "good" ? "#2f8f55" : s.tier === "mid" ? "#c08a1e" : "#8a8072";
-      return `<div class="pin${sel}${dim}" style="background:${color}">${s.num === "—" ? "?" : Math.round(s.num)}${must}</div>`;
-    }
+    // 分數顏色（pin-good／mid／low）：餐廳依總分排名，其他依期待度
+    const s = scoreInfo(it, ranks);
+    const num = s.num === "—" ? "?" : (it.is_food ? Math.round(s.num) : s.num);
+    // 抹茶：抹茶色大圖示，右下角小圓是分數
+    if (L_.isMatcha(it)) return `<div class="pin matcha${sel}${dim}">🍵<span class="mscore pin-${s.tier}">${num}</span>${must}</div>`;
+    if (it.is_food) return `<div class="pin pin-${s.tier}${sel}${dim}">${num}${must}</div>`;
     if (L_.isGinkgo(it)) return `<div class="pin ginkgo${sel}${dim}">${GINKGO_SVG}${must}</div>`;
-    const e = L_.expTotal(it);
-    const bg = e >= 4 ? "#2f8f55" : e === 3 ? "#c08a1e" : "#8a8072";
-    return `<div class="pin sq${sel}${dim}" style="background:${bg}">${L_.typeIcon(it)}${must}</div>`;
+    return `<div class="pin sq pin-${s.tier}${sel}${dim}">${L_.typeIcon(it)}${must}</div>`;
   }
   function renderMap() {
     ensureMap();
@@ -335,7 +329,7 @@
       const big = L_.isMatcha(it);
       const icon = L.divIcon({ html: pinHtml(it, ranks), className: "", iconSize: big ? [36, 36] : [28, 28], iconAnchor: big ? [18, 18] : [14, 14] });
       const mk = L.marker(it.coord, { icon, title: (big ? "🍵 " : "") + nameOf(it), zIndexOffset: it.id === state.sel ? 1000 : (it.must_go ? 500 : big ? 400 : 0), keyboard: false }).addTo(markerLayer);
-      mk.on("click", ev => { L.DomEvent.stopPropagation(ev); if (state.sel === it.id) clearSel(); else selectOnMap(it.id, false); });
+      mk.on("click", ev => { L.DomEvent.stopPropagation(ev); if (state.sel === it.id) clearSel(); else selectOnMap(it.id); });
     });
     if (!fitted && withCoord.length) {
       // 初始範圍：旅行中心 15 km 內的地點＋必去，避免福島、秩父這類遠點把地圖縮得太小
@@ -427,6 +421,7 @@
 
   /* ---------------- 抽屜（篩選／詳情）與返回鍵 ---------------- */
   let overlay = null;
+  const OVERLAYS = ["filter", "detail", "trip", "pick", "sched", "tool"];   // 各有 #xxxBackdrop 與 #xxxSheet
   function showOverlay(name) {
     hideOverlays(true);
     overlay = name;
@@ -435,14 +430,14 @@
     if (!(history.state && history.state.ov)) history.pushState({ ov: 1 }, "");
   }
   function hideOverlays(keepHistory) {
-    ["filter", "detail", "trip", "pick", "sched", "tool"].forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
+    OVERLAYS.forEach(n => { $("#" + n + "Backdrop").hidden = true; $("#" + n + "Sheet").hidden = true; });
     if (overlay === "detail") state.detail = null;
     overlay = null;
     if (!keepHistory && history.state && history.state.ov) history.back();
   }
   function closeOverlay() { if (history.state && history.state.ov) history.back(); else hideOverlays(true); }
   window.addEventListener("popstate", () => { if (overlay) hideOverlays(true); });
-  ["filter", "detail", "trip", "pick", "sched", "tool"].forEach(n => $("#" + n + "Backdrop").addEventListener("click", closeOverlay));
+  OVERLAYS.forEach(n => $("#" + n + "Backdrop").addEventListener("click", closeOverlay));
   document.addEventListener("keydown", e => { if (e.key === "Escape" && overlay) closeOverlay(); });
 
   /* ---------------- 篩選 ---------------- */
@@ -535,7 +530,7 @@
       const k = b.dataset.f;
       if (k === "date") { $("#dateBtn").click(); return; }
       if (k === "today") state.date = today();
-      else if (k === "reset") { Object.assign(state.f, { must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", hideClosed: false, showArchived: false }); }
+      else if (k === "reset") Object.assign(state.f, FILTER_DEFAULTS());
       else if (k === "clr-regions") { state.f.prefs = []; state.f.munis = []; state.f.regions = []; }
       else if (k === "clr-cats") { state.f.groups = []; state.f.subs = []; }
       else if (k === "clr-goals") state.f.goals = [];
@@ -741,7 +736,7 @@
     }
     const a = e.target.closest("[data-act]"); if (!a) return;
     if (a.dataset.act === "must") window.Store.patch(id, { must_go: !it.must_go });
-    if (a.dataset.act === "onmap") { closeOverlay(); switchTab("map"); setTimeout(() => selectOnMap(id, true), 120); }
+    if (a.dataset.act === "onmap") { closeOverlay(); switchTab("map"); setTimeout(() => selectOnMap(id), 120); }
     if (a.dataset.act === "untrip") {
       if (!confirm(`把「${nameOf(it)}」從「${tripCfg().name}」移除？\n查證過的地點資料會留在資料庫，之後可以再加回來；這次的期待度、目標、必去會清掉。`)) return;
       closeOverlay();
@@ -754,7 +749,7 @@
       else {
         const reason = window.prompt("封存原因（例如：已歇業／評價普通／太遠／有更好的選擇）：", "");
         if (reason === null) return;
-        window.Store.patch(id, { archived: true, archive_date: new Date().toISOString().slice(0, 10), archive_reason: reason || "未填寫原因" });
+        window.Store.patch(id, { archived: true, archive_date: ymd(new Date()), archive_reason: reason || "未填寫原因" });
         toast("已封存；在篩選裡打開「顯示已封存」可以找回");
       }
     }
@@ -782,7 +777,7 @@
       if (!add.length) return;
       // 使用者規則（2026-10-19）：已預約的一律必去，「已預約…」目標期待度 +5
       const booked = add.some(n => n.startsWith("已預約"));
-      const fields = { goals: cur.concat(add.map(name => name.startsWith("已預約") ? { name, exp: 5 } : { name })) };
+      fields.goals = cur.concat(add.map(name => name.startsWith("已預約") ? { name, exp: 5 } : { name }));
       if (booked) fields.must_go = true;
       window.Store.patch(state.detail, fields);
       toast(booked ? "已預約：設為必去、期待度 +5" : "已新增目標；選「＋分數」就會加到期待度");
@@ -820,8 +815,7 @@
   }
   function renderTrips() {
     const S = window.Store, c = tripCounts();
-    const now = new Date();
-    const ym = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    const ym = ymd(new Date()).slice(0, 7);
     $("#tripSheet").innerHTML = `
       <div class="sheet-head"><h2>旅程</h2><button class="icon-btn" data-close aria-label="關閉">✕</button></div>
       <p class="small">每個旅程有自己的清單。期待度、目標、必去、封存只算在那個旅程；地點的查證資料所有旅程共用。</p>
@@ -1117,9 +1111,8 @@
       if (!groups.has(g.name)) groups.set(g.name, []);
       groups.get(g.name).push({ it, g });
     }));
-    const dist = it => state.me && Array.isArray(it.coord) ? L_.distanceM(state.me, it.coord) : null;
     return [...groups.entries()].map(([name, rows]) => {
-      rows.sort((a, b) => (!!a.g.done - !!b.g.done) || ((dist(a.it) ?? 1e9) - (dist(b.it) ?? 1e9)) || ((L_.expTotal(b.it) ?? 0) - (L_.expTotal(a.it) ?? 0)));
+      rows.sort((a, b) => (!!a.g.done - !!b.g.done) || ((distOf(a.it) ?? 1e9) - (distOf(b.it) ?? 1e9)) ||((L_.expTotal(b.it) ?? 0) - (L_.expTotal(a.it) ?? 0)));
       const done = rows.filter(r => r.g.done).length;
       const exp = Math.max(...rows.map(r => typeof r.g.exp === "number" ? r.g.exp : 0));
       return { name, rows, done, exp };
@@ -1141,7 +1134,7 @@
         ${gr.rows.map(({ it, g }) => `<div class="goal-item ${g.done ? "done" : ""}" data-id="${esc(it.id)}">
           <button class="goal-check" data-gdone="${esc(g.name)}" aria-label="${g.done ? "取消完成" : "標記完成"}">${g.done ? "✅" : "⬜"}</button>
           <div class="card-main"><div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
-            <div class="card-sub">${esc(L_.regionLabel(it))}${state.me && Array.isArray(it.coord) ? ` · 📍 ${L_.fmtDistance(L_.distanceM(state.me, it.coord))}` : ""}</div></div>
+            <div class="card-sub">${esc(L_.regionLabel(it))}${distOf(it) != null ? ` · 📍 ${L_.fmtDistance(distOf(it))}` : ""}</div></div>
           ${Array.isArray(it.coord) || it.address ? `<a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
         </div>`).join("")}
       </div>`).join("")}
