@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.01";
+  const APP_VERSION = "2026.11.03";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -1053,22 +1053,11 @@
     if (remindOn() && Date.now() - lastFix > 3 * 60000) quietLocate(renderRemind);
     renderRemind();
     if (state.tab === "schedule" && !overlay) renderNow();
+    // 推薦分頁開著：每 3 分鐘更新一次位置，走到有目標的地點附近就會自動出現
+    if (state.tab === "rec" && !overlay) { if (Date.now() - lastFix > 3 * 60000) recLocate(); else renderRec(); }
   }, 30000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
 
-  /* 沒有排程時：四個選項 → 從這個旅程的清單找附近、今天有開的地點 */
-  function suggestions(kind) {
-    const opt = L_.SUGGEST.find(o => o.id === kind);
-    if (!opt || !state.me) return [];
-    const today = new Date();
-    const list = tripItems().filter(it => !it.archived && Array.isArray(it.coord) && opt.test(it))
-      .filter(it => { const c = L_.closedOn(it, today).level; return c !== "closed" && c !== "gone"; })
-      .map(it => ({ it, d: L_.distanceM(state.me, it.coord) }))
-      .sort((a, b) => a.d - b.d);
-    // 「附近」＝直線 3 km 內；3 km 內都沒有時，列最近的 3 個並標「較遠」
-    const near = list.filter(x => x.d <= NEAR_M);
-    return near.length ? near.slice(0, 6) : list.slice(0, 3).map(x => Object.assign(x, { far: true }));
-  }
   function nowHtml() {
     const now = new Date(), cur = currentPlan(now), nx = nextPlan(now);
     const free = !cur && (!nx || nx.leaveAt - now > FREE_GAP * 60000);
@@ -1080,25 +1069,8 @@
         <span class="small">（${nx.travel != null ? `估計交通 ${nx.travel} 分，從${esc(nx.fromLabel)}` : "交通時間未知，先抓 30 分"}）</span>
         ${p ? `<a class="link-btn" href="${esc(L_.navUrl(p))}" target="_blank" rel="noopener">🧭 導航</a>` : ""}</p>`;
     }
-    if (free) {
-      html += `<p class="free-q">${nx ? `離下個行程出發還有 ${Math.round((nx.leaveAt - now) / 60000)} 分。` : "現在沒有排程。"}想做什麼？</p>
-        <div class="chips suggest-chips">${L_.SUGGEST.map(o => `<button class="chip ${state.suggest === o.id ? "on" : ""}" data-suggest="${o.id}">${o.icon} ${o.label}</button>`).join("")}</div>`;
-      if (state.suggest) {
-        if (!state.me) html += `<p class="small">取得位置中…</p>`;
-        else {
-          const list = suggestions(state.suggest);
-          html += list.length ? (list[0].far ? `<p class="small">3 km 內沒有符合的地點，以下是最近的：</p>` : "") + `<div class="suggest-list">${list.map(({ it, d }) => `<div class="sg-row" data-id="${esc(it.id)}">
-              <div class="card-icon">${iconHtml(it)}</div>
-              <div class="card-main"><div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
-                <div class="card-sub">${esc(L_.subOf(it) || "")} · 📍 ${L_.fmtDistance(d)} · 約 ${L_.travelMinutes(state.me, it.coord)} 分${it.cautions ? ' · <span class="badge b-note">⚠️ 注意</span>' : ""}</div>
-                ${state.suggest === "goal" ? `<div class="card-goals">🎯 ${L_.openGoals(it).map(goalLabel).join("、")}</div>` : ""}</div>
-              <a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>
-            </div>`).join("")}</div>
-            <p class="small">依直線距離排序；已排除今天公休的地點。交通時間是粗估，以 Google Maps 為準。</p>`
-            : `<p class="small">附近沒有符合的地點（或都公休）。</p>`;
-        }
-      }
-    }
+    if (free) html += `<p class="free-q">${nx ? `離下個行程出發還有 ${Math.round((nx.leaveAt - now) / 60000)} 分。` : "現在沒有排程。"}
+      <button class="link-btn" data-torec>✨ 看附近推薦</button></p>`;
     return html || `<p class="small">還沒有排程。</p>`;
   }
   function renderNow() { const el = $("#nowCard"); if (el) el.innerHTML = nowHtml(); }
@@ -1148,6 +1120,76 @@
     });
     window.Store.patch(id, { goals });
   }
+
+  /* ---------------- ✨ 推薦（獨立分頁） ----------------
+     有還沒完成目標的地點：人在附近（直線 3 km 內）就自動列出、放最上面。
+     其他地點：選「想做什麼」才列出。都只找這個旅程清單裡、沒封存、今天有開的地點。 */
+  let recLocErr = false;
+  function recLocate() {
+    getPosition(() => { recLocErr = false; renderRec(); }, () => { recLocErr = true; renderRec(); });
+  }
+  const hasGoal = it => L_.openGoals(it).length > 0;
+  function nearbyOf(test) {
+    if (!state.me) return [];
+    const today = new Date();
+    return tripItems().filter(it => !it.archived && Array.isArray(it.coord) && test(it))
+      .filter(it => { const c = L_.closedOn(it, today).level; return c !== "closed" && c !== "gone"; })
+      .map(it => ({ it, d: L_.distanceM(state.me, it.coord) }))
+      .sort((a, b) => a.d - b.d);
+  }
+  const nearGoals = () => nearbyOf(hasGoal).filter(x => x.d <= NEAR_M);
+  function suggestions(kind) {
+    const opt = L_.SUGGEST.find(o => o.id === kind);
+    if (!opt) return [];
+    // 已經列在「附近的目標」的不重複
+    const shown = new Set(nearGoals().map(x => x.it.id));
+    const list = nearbyOf(opt.test).filter(x => !shown.has(x.it.id));
+    // 「附近」＝直線 3 km 內；3 km 內都沒有時，列最近的 3 個並標「較遠」
+    const near = list.filter(x => x.d <= NEAR_M);
+    return near.length ? near.slice(0, 6) : list.slice(0, 3).map(x => Object.assign(x, { far: true }));
+  }
+  function sgRowHtml({ it, d }) {
+    const goals = L_.openGoals(it);
+    return `<div class="sg-row" data-id="${esc(it.id)}">
+      <div class="card-icon">${iconHtml(it)}</div>
+      <div class="card-main"><div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
+        <div class="card-sub">${[esc(L_.subOf(it) || ""), `📍 ${L_.fmtDistance(d)}`, `約 ${L_.travelMinutes(state.me, it.coord)} 分`, it.cautions ? '<span class="badge b-note">⚠️ 注意</span>' : ""].filter(Boolean).join(" · ")}</div>
+        ${goals.length ? `<div class="card-goals">🎯 ${goals.map(goalLabel).join("、")}</div>` : ""}</div>
+      <a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>
+    </div>`;
+  }
+  function recHtml() {
+    const now = new Date(), cur = currentPlan(now), nx = nextPlan(now);
+    let head = "";
+    if (cur) head += `<p>📍 現在：<b>${esc(schedName(cur))}</b>${cur.end ? `（到 ${esc(cur.end)}）` : ""}</p>`;
+    if (nx && nx.leaveAt - now < 12 * 3600000) head += `<p>⏭ 下一個：<b>${esc(nx.item.start)} ${esc(schedName(nx.item))}</b>，建議 <b>${hm(nx.leaveAt)}</b> 出發（還有 ${Math.max(0, Math.round((nx.leaveAt - now) / 60000))} 分）</p>`;
+    const loc = state.me ? `📍 依目前位置（${hm(new Date(lastFix))} 更新）`
+      : recLocErr ? "⚠️ 拿不到位置，請在瀏覽器允許定位" : "取得位置中…";
+    head += `<p class="small">${loc} <button class="link-btn" data-relocate>更新位置</button></p>`;
+    if (!state.me) return head;
+
+    const goals = nearGoals();
+    let html = head + `<div class="panel"><h3>🎯 附近的目標</h3>
+      ${goals.length ? `<div class="suggest-list">${goals.map(sgRowHtml).join("")}</div>`
+        : `<p class="small">3 km 內沒有還沒完成目標的地點。</p>`}</div>`;
+    html += `<div class="panel"><h3>想做什麼？</h3>
+      <div class="chips suggest-chips">${L_.SUGGEST.map(o => `<button class="chip ${state.suggest === o.id ? "on" : ""}" data-suggest="${o.id}">${o.icon} ${o.label}</button>`).join("")}</div>`;
+    if (state.suggest) {
+      const list = suggestions(state.suggest);
+      html += list.length ? (list[0].far ? `<p class="small">3 km 內沒有符合的地點，以下是最近的：</p>` : "") + `<div class="suggest-list">${list.map(sgRowHtml).join("")}</div>`
+        : `<p class="small">附近沒有其他符合的地點（或都公休）。</p>`;
+    }
+    html += `</div><p class="small">依直線距離排序；已排除今天公休、已封存的地點。交通時間是粗估，以 Google Maps 為準。</p>`;
+    return html;
+  }
+  function renderRec() { $("#recView").innerHTML = recHtml(); }
+  $("#recView").addEventListener("click", e => {
+    if (e.target.closest("[data-go]")) return;
+    if (e.target.closest("[data-relocate]")) { toast("取得位置中…"); recLocate(); return; }
+    const sg = e.target.closest("[data-suggest]");
+    if (sg) { state.suggest = state.suggest === sg.dataset.suggest ? null : sg.dataset.suggest; renderRec(); return; }
+    const row = e.target.closest(".sg-row"); if (row) openDetail(row.dataset.id);
+  });
 
   function renderSchedule() {
     const days = tripDays();
@@ -1204,13 +1246,7 @@
       return;
     }
     const gi = e.target.closest(".goal-item"); if (gi) { openDetail(gi.dataset.id); return; }
-    const sg = e.target.closest("[data-suggest]");
-    if (sg) {
-      state.suggest = state.suggest === sg.dataset.suggest ? null : sg.dataset.suggest;
-      if (state.suggest && !state.me) quietLocate(renderNow);
-      renderNow(); return;
-    }
-    const sgRow = e.target.closest(".sg-row"); if (sgRow) { openDetail(sgRow.dataset.id); return; }
+    if (e.target.closest("[data-torec]")) { switchTab("rec"); return; }
     const row = e.target.closest("[data-sid]"); if (row) { openSchedEdit(row.dataset.sid); return; }
     const b = e.target.closest("[data-s]"); if (!b) return;
     if (b.dataset.s === "add") openSchedEdit(null);
@@ -1529,9 +1565,10 @@
   function switchTab(tab) {
     state.tab = tab; persistUi();
     document.querySelectorAll(".bottom-nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-    ["map", "list", "schedule", "tools", "more"].forEach(t => $("#" + t + "View").classList.toggle("active", t === tab));
-    $("#quickRow").hidden = tab === "more" || tab === "schedule" || tab === "tools";
+    ["map", "list", "schedule", "rec", "tools", "more"].forEach(t => $("#" + t + "View").classList.toggle("active", t === tab));
+    $("#quickRow").hidden = tab !== "map" && tab !== "list";
     render();
+    if (tab === "rec") recLocate();
     if (tab === "map" && map) setTimeout(() => map.invalidateSize(), 30);
   }
   document.querySelector(".bottom-nav").addEventListener("click", e => {
@@ -1551,6 +1588,7 @@
       if (state.tab === "list") renderList();
       if (state.tab === "more") renderMore();
       if (state.tab === "schedule") renderSchedule();
+      if (state.tab === "rec") renderRec();
       if (state.tab === "tools") renderTools();
       renderRemind();
       if (overlay === "detail") renderDetail();

@@ -242,9 +242,8 @@
     return Math.round(12 + d / 1000 * 2.4);
   }
 
-  /* 沒有排程時的四個選項 → 對應清單裡的類型 */
+  /* 「推薦」分頁的「想做什麼」選項 → 對應清單裡的類型（有目標的地點不用選，在附近就自動列出） */
   const SUGGEST = [
-    { id: "goal", label: "周遭目標", icon: "🎯", test: it => openGoals(it).length > 0 },
     { id: "shop", label: "購物", icon: "🛍️", test: it => groupOf(it) === "shop" },
     { id: "meal", label: "用餐", icon: "🍜", test: it => groupOf(it) === "food" && ["正餐", "拉麵", "小吃"].includes(subOf(it)) },
     { id: "snack", label: "點心", icon: "🍰", test: it => groupOf(it) === "food" && ["咖啡", "茶飲", "甜點", "小吃"].includes(subOf(it)) },

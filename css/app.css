@@ -289,7 +289,8 @@ details.more[open] summary::after { content: " ▴"; }
 .remind-bar b { font-size: 14px; color: var(--teal); }
 .remind-bar.urgent { background: var(--accent-soft); }
 .remind-bar.urgent b { color: var(--accent); }
-#scheduleView { overflow-y: auto; padding: 12px 12px 24px; }
+#scheduleView, #recView { overflow-y: auto; padding: 12px 12px 24px; }
+#recView > p { margin: 4px 0 10px; font-size: 14px; line-height: 1.6; }
 .now-card p { margin: 6px 0; line-height: 1.6; }
 .free-q { font-weight: 800; }
 .suggest-chips { margin: 6px 0 4px; }
