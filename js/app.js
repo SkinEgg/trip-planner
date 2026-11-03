@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.03";
+  const APP_VERSION = "2026.11.03b";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -1364,6 +1364,19 @@
     return { label: line.slice(0, i).replace(/[｜|:：\s]+$/, "").trim(), url: line.slice(i).trim() };
   }).filter(Boolean);
   let editingTool = null;
+  /* 樹狀分支（工具的 tree 欄位）：每個節點 { t: 標題, k: 類型, d: 內文, c: [子節點] }，點選展開。
+     k：fork＝分支（多選一）、opt＝其中一個方案、step＝步驟、flow＝流程、gear＝必須設備、warn＝注意事項、info＝說明 */
+  const TREE_BADGE = { fork: "分支", flow: "流程", gear: "設備", warn: "注意" };
+  const treeOpen = new Set();   // 展開中的節點（重畫時保留）
+  function treeHtml(nodes, path) {
+    return `<ul class="tree">${nodes.map((n, i) => {
+      const p = path + "." + i, kids = Array.isArray(n.c) ? n.c : [], k = esc(n.k || "info");
+      const head = (TREE_BADGE[n.k] ? `<span class="tbadge">${TREE_BADGE[n.k]}</span>` : "") + `<span class="tnode-t">${esc(n.t || "")}</span>`;
+      const body = (n.d ? `<div class="tnode-d">${linkify(n.d)}</div>` : "") + (kids.length ? treeHtml(kids, p) : "");
+      if (!body) return `<li><div class="tnode tleaf tk-${k}">${head}</div></li>`;
+      return `<li><details class="tnode tk-${k}" data-tp="${esc(p)}" ${treeOpen.has(p) ? "open" : ""}><summary>${head}</summary>${body}</details></li>`;
+    }).join("")}</ul>`;
+  }
   function renderTools() {
     const list = window.Store.tools();
     const open = state.toolOpen || {};
@@ -1376,12 +1389,30 @@
           <div class="tool-meta">${[t.category, t.country].filter(Boolean).map(x => `<span class="badge b-tool">${esc(x)}</span>`).join(" ")}${t.checked ? `<span class="small">查證 ${esc(t.checked)}</span>` : ""}</div>
         </summary>
         ${(t.links || []).length ? `<div class="tool-links">${t.links.map(l => `<a class="btn tool-link" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || l.url)} ↗</a>`).join("")}</div>` : ""}
+        ${Array.isArray(t.tree) && t.tree.length ? `<div class="tool-tree">
+          <div class="tree-tools"><button class="link-btn" data-tx="open">全部展開</button><button class="link-btn" data-tx="close">全部收合</button></div>
+          ${treeHtml(t.tree, t.id)}</div>` : ""}
         ${t.content ? `<div class="tool-content">${linkify(t.content)}</div>` : ""}
         ${t.source ? `<p class="small">來源：${t.source_url ? `<a href="${esc(t.source_url)}" target="_blank" rel="noopener">${esc(t.source)}</a>` : esc(t.source)}</p>` : ""}
         <div class="tool-foot"><button class="link-btn" data-t="edit">編輯</button></div>
       </details>`).join("") : '<div class="empty">還沒有工具。按「＋ 新增工具」開始。</div>'}`;
   }
   $("#toolsView").addEventListener("click", e => {
+    // 樹狀節點：click 先於 details 切換，所以 open 還是切換前的狀態
+    const ts = e.target.closest(".tnode > summary");
+    if (ts && !e.target.closest("a")) {
+      const d = ts.parentElement;
+      if (d.open) treeOpen.delete(d.dataset.tp); else treeOpen.add(d.dataset.tp);
+      return;
+    }
+    const tx = e.target.closest("[data-tx]");
+    if (tx) {
+      tx.closest(".tool-tree").querySelectorAll("details.tnode").forEach(d => {
+        d.open = tx.dataset.tx === "open";
+        if (d.open) treeOpen.add(d.dataset.tp); else treeOpen.delete(d.dataset.tp);
+      });
+      return;
+    }
     const sum = e.target.closest(".tool-card > summary");
     if (sum && !e.target.closest("a")) {
       const id = sum.parentElement.dataset.tid;
