@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.03b";
+  const APP_VERSION = "2026.11.05";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -1090,26 +1090,34 @@
       return { name, rows, done, exp };
     }).sort((a, b) => ((a.done === a.rows.length) - (b.done === b.rows.length)) || (b.exp - a.exp) || a.name.localeCompare(b.name, "zh-Hant"));
   }
+  const goalGrpOpen = new Set();   // 展開中的目標（重畫後保持）
   function goalsHtml() {
     const groups = goalGroups();
     if (!groups.length) return "";
     const allDone = groups.filter(g => g.done === g.rows.length).length;
     return `<details class="panel goal-panel" ${state.goalsOpen ? "open" : ""} data-goals>
       <summary><b>🎯 目標清單</b><span class="small">${groups.length} 個目標・已完成 ${allDone}</span></summary>
-      <p class="small">打勾＝完成（不影響分數）。只要在一個地方完成的目標（例如買圍巾），按「整組完成」。</p>
-      ${groups.map(gr => `<div class="goal-grp ${gr.done === gr.rows.length ? "all-done" : ""}">
-        <div class="goal-head">
-          <span class="goal-name">${gr.done === gr.rows.length ? "✅ " : ""}${esc(gr.name)}${gr.exp ? `<small> +${gr.exp}</small>` : ""}</span>
-          <span class="small">${gr.rows.length > 1 ? `${gr.done}/${gr.rows.length} 處` : ""}</span>
-          ${gr.rows.length > 1 ? `<button class="link-btn" data-gall="${esc(gr.name)}">${gr.done === gr.rows.length ? "取消完成" : "整組完成"}</button>` : ""}
-        </div>
+      <p class="small">點目標展開地點。打勾＝完成（不影響分數）。只要在一個地方完成的目標（例如買圍巾），按「整組完成」。</p>
+      ${groups.map(gr => {
+        const allOk = gr.done === gr.rows.length;
+        const next = gr.rows.find(r => !r.g.done) || gr.rows[0];   // 已依「未完成→距離」排序，第一筆就是最近的未完成地點
+        const nd = distOf(next.it);
+        const hint = gr.rows.length > 1 ? `最近：${nameOf(next.it)}${nd != null ? ` ${L_.fmtDistance(nd)}` : ""}` : nameOf(next.it);
+        return `<details class="goal-grp ${allOk ? "all-done" : ""}" data-ggrp="${esc(gr.name)}" ${goalGrpOpen.has(gr.name) ? "open" : ""}>
+        <summary class="goal-head">
+          <span class="goal-name">${allOk ? "✅ " : ""}${esc(gr.name)}${gr.exp ? `<small> +${gr.exp}</small>` : ""}
+            <span class="goal-hint">${esc(hint)}</span></span>
+          <span class="small">${gr.rows.length > 1 ? `${gr.done}/${gr.rows.length} 處` : allOk ? "已完成" : "1 處"}</span>
+          ${gr.rows.length > 1 ? `<button class="link-btn" data-gall="${esc(gr.name)}">${allOk ? "取消完成" : "整組完成"}</button>` : ""}
+        </summary>
         ${gr.rows.map(({ it, g }) => `<div class="goal-item ${g.done ? "done" : ""}" data-id="${esc(it.id)}">
           <button class="goal-check" data-gdone="${esc(g.name)}" aria-label="${g.done ? "取消完成" : "標記完成"}">${g.done ? "✅" : "⬜"}</button>
           <div class="card-main"><div class="card-name">${it.must_go ? '<span class="star">★</span>' : ""}${esc(nameOf(it))}</div>
             <div class="card-sub">${esc(L_.regionLabel(it))}${distOf(it) != null ? ` · 📍 ${L_.fmtDistance(distOf(it))}` : ""}</div></div>
           ${Array.isArray(it.coord) || it.address ? `<a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
         </div>`).join("")}
-      </div>`).join("")}
+      </details>`;
+      }).join("")}
     </details>`;
   }
   function setGoalDone(id, name, done) {
@@ -1230,6 +1238,12 @@
   $("#scheduleView").addEventListener("click", async e => {
     if (e.target.closest("[data-go]")) return;
     if (e.target.closest("[data-goals] > summary")) { state.goalsOpen = !e.target.closest("[data-goals]").open; return; }
+    const gs = !e.target.closest("[data-gall]") && e.target.closest(".goal-grp > summary");
+    if (gs) {
+      const name = gs.parentElement.dataset.ggrp;
+      if (gs.parentElement.open) goalGrpOpen.delete(name); else goalGrpOpen.add(name);
+      return;
+    }
     const gd = e.target.closest("[data-gdone]");
     if (gd) {
       const row = gd.closest("[data-id]"), it = getItem(row.dataset.id);
@@ -1239,6 +1253,7 @@
     }
     const ga = e.target.closest("[data-gall]");
     if (ga) {
+      e.preventDefault();   // 按鈕在 summary 裡，不要順便展開／收合
       const gr = goalGroups().find(x => x.name === ga.dataset.gall); if (!gr) return;
       const done = gr.done !== gr.rows.length;
       gr.rows.forEach(r => setGoalDone(r.it.id, gr.name, done));
