@@ -367,7 +367,14 @@ details.more[open] summary::after { content: " ▴"; }
 .goal-panel[open] > summary::before { content: "▾"; }
 .goal-grp { margin-top: 10px; border-top: 1px solid var(--soft); padding-top: 8px; }
 .goal-head { display: flex; align-items: baseline; gap: 8px; }
+summary.goal-head { cursor: pointer; list-style: none; padding: 2px 0; }
+summary.goal-head::-webkit-details-marker { display: none; }
+summary.goal-head::before { content: "▸"; color: var(--muted); flex-shrink: 0; }
+.goal-grp[open] > summary.goal-head::before { content: "▾"; }
+.goal-grp[open] > summary.goal-head { margin-bottom: 2px; }
 .goal-head .goal-name { font-weight: 800; flex: 1; min-width: 0; }
+.goal-hint { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-grp[open] .goal-hint { display: none; }
 .goal-name small, .card-goals small { color: var(--teal); font-weight: 800; }
 .goal-grp.all-done .goal-name { color: var(--muted); }
 .goal-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; }
