@@ -433,7 +433,7 @@
       commit();
     },
 
-    /* 排程草案（目前旅程）：每筆 { id, date, start, end, poi_id, title, note, order } */
+    /* 排程草案（目前旅程）：每筆 { id, date, start, end, poi_id, title, note, order, tool_id（推薦工具） } */
     schedule() {
       return [...sched.values()].filter(s => s.trip === curTrip).map(s => Object.assign({ id: s.id }, s.data))
         .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.order || 0) - (b.order || 0) || (a.start || "99").localeCompare(b.start || "99"));
@@ -458,7 +458,7 @@
       commit();
     },
 
-    /* 旅遊工具清單（所有旅程共用）：每筆 { title, category, country, content, links: [{ label, url }], source, source_url, checked, order } */
+    /* 旅遊工具清單（所有旅程共用）：每筆 { title, category, country, content, links: [{ label, url }], tree, images: [{ storage 或 url, caption }], source, source_url, checked, order } */
     tools() {
       return [...tools.values()].map(s => Object.assign({ id: s.id }, s.data))
         .sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || (a.title || "").localeCompare(b.title || "", "zh-Hant"));

@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.06";
+  const APP_VERSION = "2026.11.09";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -1199,6 +1199,21 @@
     const row = e.target.closest(".sg-row"); if (row) openDetail(row.dataset.id);
   });
 
+  // 行程的「推薦工具」：連到工具清單裡的一筆，點了跳到工具分頁並展開那一筆
+  function schedToolHtml(s) {
+    const t = s.tool_id && window.Store.tools().find(x => x.id === s.tool_id);
+    return t ? `<button type="button" class="sched-link sched-tool" data-tool="${esc(t.id)}">🧰 推薦工具：${esc(t.title || "（未命名）")}</button>` : "";
+  }
+  function openTool(id) {
+    state.toolOpen = Object.assign({}, state.toolOpen, { [id]: true });
+    switchTab("tools");
+    // 等重畫完再捲到那一筆
+    setTimeout(() => {
+      const card = [...document.querySelectorAll("#toolsView [data-tid]")].find(el => el.dataset.tid === id);
+      if (card) card.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 80);
+  }
+
   function renderSchedule() {
     const days = tripDays();
     const today = ymd(new Date());
@@ -1217,7 +1232,7 @@
           ${daySorted(date).filter(s => s.pin).map(s => `<div class="sched-row sched-pin" data-sid="${esc(s.id)}">
               <div class="sched-time">📌</div>
               <div class="card-main"><div class="card-name">${esc(s.title || s.url || "（置頂）")}</div>
-                ${s.note ? `<div class="card-sub">${esc(s.note)}</div>` : ""}</div>
+                ${s.note ? `<div class="card-sub">${esc(s.note)}</div>` : ""}${schedToolHtml(s)}</div>
               ${s.url ? `<a class="go-btn" href="${esc(s.url)}" target="_blank" rel="noopener" title="打開連結" data-go>↗</a>` : ""}
             </div>`).join("")}
           ${daySorted(date).filter(s => !s.pin).map(s => {
@@ -1229,7 +1244,7 @@
               <div class="sched-time">${s.start ? esc(s.start) + (s.end ? `<small>–${esc(s.end)}</small>` : "") : "<small>時間未定</small>"}</div>
               <div class="card-main"><div class="card-name">${p && p.must_go ? '<span class="star">★</span>' : ""}${esc(schedName(s))}</div>
                 ${sub ? `<div class="card-sub">${sub}</div>` : ""}
-                ${s.url ? `<a class="sched-link" href="${esc(s.url)}" target="_blank" rel="noopener" data-go>🔗 打開連結</a>` : ""}</div>
+                ${s.url ? `<a class="sched-link" href="${esc(s.url)}" target="_blank" rel="noopener" data-go>🔗 打開連結</a>` : ""}${schedToolHtml(s)}</div>
               ${go ? `<a class="go-btn" href="${esc(L_.navUrl(go))}" target="_blank" rel="noopener" title="導航" data-go>🧭</a>` : ""}
             </div>`;
           }).join("") || (daySorted(date).some(s => s.pin) ? "" : '<div class="small sched-empty">（這天還沒有安排）</div>')}
@@ -1262,6 +1277,7 @@
     }
     const gi = e.target.closest(".goal-item"); if (gi) { openDetail(gi.dataset.id); return; }
     if (e.target.closest("[data-torec]")) { switchTab("rec"); return; }
+    const tl = e.target.closest("[data-tool]"); if (tl) { openTool(tl.dataset.tool); return; }
     const row = e.target.closest("[data-sid]"); if (row) { openSchedEdit(row.dataset.sid); return; }
     const b = e.target.closest("[data-s]"); if (!b) return;
     if (b.dataset.s === "add") openSchedEdit(null);
@@ -1304,6 +1320,8 @@
         <div class="field"><label>標題（沒連結地點時必填，例：下飛機）</label><input name="title" value="${esc(s && s.title || "")}"></div>
         <div class="field"><label>備註</label><textarea name="note">${esc(s && s.note || "")}</textarea></div>
         <div class="field"><label>連結（可空，例：參考文章）</label><input name="url" type="url" inputmode="url" value="${esc(s && s.url || "")}" placeholder="https://"></div>
+        <div class="field"><label>🧰 推薦工具（可空，連到工具清單）</label><select name="tool_id"><option value="">（不連結工具）</option>
+          ${window.Store.tools().map(t => `<option value="${esc(t.id)}" ${s && s.tool_id === t.id ? "selected" : ""}>${esc(t.title || "（未命名）")}</option>`).join("")}</select></div>
         <label class="check-row"><input type="checkbox" name="pin" ${s && s.pin ? "checked" : ""}> 📌 置頂在當天最上面</label>
         <div class="sheet-foot">
           ${s ? '<button type="button" class="btn danger" data-del>刪除</button>' : ""}
@@ -1331,6 +1349,7 @@
     v.url = f.url.value.trim();
     if (v.url && !/^https?:\/\//i.test(v.url)) v.url = "https://" + v.url;
     v.pin = f.pin.checked;
+    v.tool_id = f.tool_id.value || null;
     if (!v.date) { alert("請選日期"); return; }
     if (!v.poi_id && !v.title && !(v.pin && v.url)) { alert("請選一個地點，或填標題"); return; }
     const old = editingSid && window.Store.schedule().find(x => x.id === editingSid);
@@ -1404,6 +1423,7 @@
           <div class="tool-meta">${[t.category, t.country].filter(Boolean).map(x => `<span class="badge b-tool">${esc(x)}</span>`).join(" ")}${t.checked ? `<span class="small">查證 ${esc(t.checked)}</span>` : ""}</div>
         </summary>
         ${(t.links || []).length ? `<div class="tool-links">${t.links.map(l => `<a class="btn tool-link" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label || l.url)} ↗</a>`).join("")}</div>` : ""}
+        ${toolImagesHtml(t)}
         ${Array.isArray(t.tree) && t.tree.length ? `<div class="tool-tree">
           <div class="tree-tools"><button class="link-btn" data-tx="open">全部展開</button><button class="link-btn" data-tx="close">全部收合</button></div>
           ${treeHtml(t.tree, t.id)}</div>` : ""}
@@ -1411,6 +1431,23 @@
         ${t.source ? `<p class="small">來源：${t.source_url ? `<a href="${esc(t.source_url)}" target="_blank" rel="noopener">${esc(t.source)}</a>` : esc(t.source)}</p>` : ""}
         <div class="tool-foot"><button class="link-btn" data-t="edit">編輯</button></div>
       </details>`).join("") : '<div class="empty">還沒有工具。按「＋ 新增工具」開始。</div>'}`;
+    // 私人空間的圖：取臨時網址後顯示，點圖可開原圖；取不到（未登入、本機模式）就隱藏
+    $("#toolsView").querySelectorAll("img[data-storage]").forEach(img => {
+      window.Store.photoUrl(img.dataset.storage).then(u => {
+        const fig = img.closest("figure");
+        if (!u) { if (fig) fig.remove(); return; }
+        img.src = u;
+        const a = img.closest("a"); if (a) a.href = u;
+      });
+    });
+  }
+  // 工具的圖片（images 欄位）：[{ storage: 私人空間路徑 或 url: 網址, caption }]，整張顯示不裁切
+  function toolImagesHtml(t) {
+    const imgs = (Array.isArray(t.images) ? t.images : []).filter(p => p && (p.url || p.storage));
+    if (!imgs.length) return "";
+    return `<div class="tool-images">${imgs.map(p => `<figure class="tool-image">
+      <a ${p.url ? `href="${esc(p.url)}"` : ""} target="_blank" rel="noopener"><img ${p.url ? `src="${esc(p.url)}"` : `data-storage="${esc(p.storage)}"`} alt="${esc(p.caption || t.title || "")}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('figure').remove()"></a>
+      ${p.caption ? `<figcaption>${esc(p.caption)}</figcaption>` : ""}</figure>`).join("")}</div>`;
   }
   $("#toolsView").addEventListener("click", e => {
     // 樹狀節點：click 先於 details 切換，所以 open 還是切換前的狀態
