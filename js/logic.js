@@ -1,8 +1,8 @@
 /* 純邏輯：評分、分類、篩選、當天公休判斷。不碰畫面，方便之後測試與沿用。
-   評分規則沿用概念規格 v1.0 與舊版工具第 11 版：
-   - 餐飲類：總分 = 期待度 + Google 評分 + Tabelog 評分（有幾個加幾個）
-   - 非餐飲類：只看期待度
-   - 必去是獨立標記，不進總分 */
+   評分規則（2026-11-14 使用者決定拆開，不再相加成總分）：
+   - 期待分數（expTotal）：所有地點都有＝原本期待度＋追加目標的分數
+   - 餐飲分數（comboScore）：只有餐飲類＝Google 評分＋Tabelog 評分（有幾個加幾個）
+   - 必去是獨立標記，不進分數 */
 (function () {
   "use strict";
 
@@ -24,6 +24,7 @@
   function gmTierOf(s) { return s == null ? null : s >= 4.5 ? "good" : s >= 4.0 ? "mid" : "bad"; }
   function tabelogTierOf(s) { return s == null ? null : s >= 3.5 ? "good" : s >= 3.0 ? "mid" : "bad"; }
 
+  // 餐飲分數：Google＋Tabelog（非餐飲或兩個都沒有＝null）
   function comboScore(item) {
     if (!item.is_food) return null;
     const vals = [];
@@ -48,12 +49,6 @@
     if (base == null && !extra.length) return null;
     return (base || 0) + extra.reduce((a, g) => a + g.exp, 0);
   }
-  function totalScore(item) {
-    const combo = comboScore(item);
-    const exp = expTotal(item);
-    if (combo == null && exp == null) return null;
-    return round2((combo || 0) + (exp || 0));
-  }
 
   /* 類型分兩層（使用者 2026-10-15 決定）：類型欄位寫成「大類／細類」，例如「餐廳／拉麵」。
      大類只有三種；細類是篩選第二層。改這裡就會同時改篩選選單與編輯選單。 */
@@ -77,6 +72,13 @@
     return "sight";
   }
   function subOf(item) { return splitCategory(item.category).sub; }
+  // 依類型集中排序用：大類依 GROUPS 順序（風景→購物→餐廳），同大類再依細類順序；不認得的細類排在該大類最後
+  function typeRank(item) {
+    const gi = GROUPS.findIndex(x => x.id === groupOf(item));
+    const subs = gi >= 0 ? GROUPS[gi].subs : [];
+    const si = subs.indexOf(subOf(item));
+    return (gi < 0 ? GROUPS.length : gi) * 100 + (si < 0 ? 99 : si);
+  }
 
   const SUB_ICON = {
     "神社寺院": "⛩️", "自然公園": "🌳", "街道地標": "🏮", "季節活動": "🎆",
@@ -252,8 +254,8 @@
   ];
 
   window.Logic = {
-    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, totalScore, goalList, openGoals, expTotal,
-    GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, isMatcha, verifyLevel,
+    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals, expTotal,
+    GROUPS, splitCategory, groupOf, subOf, typeRank, typeIcon, isGinkgo, isMatcha, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
   };

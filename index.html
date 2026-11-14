@@ -41,9 +41,11 @@
         <div class="list-tools">
           <input type="search" id="searchInput" placeholder="搜尋名稱、標籤、地址…" autocomplete="off">
           <select id="sortSel" aria-label="排序">
+            <option value="type">依類型</option>
             <option value="rec">推薦排序</option>
-            <option value="dist">距離近→遠</option>
-            <option value="region">依最近車站</option>
+            <option value="exp">期待分數高→低</option>
+            <option value="food">餐飲分數高→低</option>
+            <option value="dist">距離近→遠（不分組）</option>
           </select>
         </div>
         <div class="list-count" id="listCount"></div>
