@@ -9,14 +9,14 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.09";
+  const APP_VERSION = "2026.11.14";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
   /* ---------------- 狀態 ---------------- */
   const saved = LS.get("tripapp.ui.v1", {});
   // 篩選的預設值（「全部清除」也回到這裡）
-  const FILTER_DEFAULTS = () => ({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", hideClosed: false, showArchived: false });
+  const FILTER_DEFAULTS = () => ({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", minFood: "", hideClosed: false, showArchived: false });
   const state = {
     tab: saved.tab || "map",
     trip: saved.trip || CFG.defaultTrip,
@@ -128,6 +128,8 @@
     if (f.goals.length && !L_.goalList(it).some(g => f.goals.includes(g.name))) return false;
     if (f.verify && L_.verifyLevel(it.verify) !== f.verify) return false;
     if (f.minExp && !(L_.expTotal(it) != null && L_.expTotal(it) >= +f.minExp)) return false;
+    // 餐飲分數至少：只留下有評分、達到門檻的餐廳（非餐飲沒有餐飲分數，一併排除）
+    if (f.minFood && !(L_.comboScore(it) != null && L_.comboScore(it) >= +f.minFood)) return false;
     if (f.hideClosed) { const c = L_.closedOn(it, state.date).level; if (c === "closed" || c === "gone") return false; }
     if (state.q) {
       const hay = L_.norm([it.name, it.name_clean, it.region, it.category, it.address, it.notes, it.cautions, it.user_notes, (it.tags || []).join(" "), L_.goalList(it).map(g => g.name).join(" ")].join(" "));
@@ -138,24 +140,44 @@
   function filtered() { return tripItems().filter(passes); }
   function activeFilterCount() {
     const f = state.f;
-    return f.prefs.length + f.munis.length + f.regions.length + f.subs.length + f.tags.length + f.goals.length + (f.verify ? 1 : 0) + (f.minExp ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
+    return f.prefs.length + f.munis.length + f.regions.length + f.subs.length + f.tags.length + f.goals.length + (f.verify ? 1 : 0) + (f.minExp ? 1 : 0) + (f.minFood ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
   }
 
-  /* 分數顯示：餐飲＝總分（顏色依目前篩選結果中的相對排名，前／中／後三分之一）；非餐飲＝期待度 */
+  /* 分數顯示（2026-11-14 使用者決定拆開，不再相加）：
+     - 期待分數：所有地點都顯示（期待度＋追加目標），4 以上綠、3 黃、其他灰
+     - 餐飲分數：只有餐飲類（Google＋Tabelog），顏色依目前篩選結果中的相對排名（前／中／後三分之一） */
   function rankMap(list) {
-    const food = list.filter(d => d.is_food && L_.totalScore(d) != null)
-      .map(d => ({ id: d.id, s: L_.totalScore(d) })).sort((a, b) => b.s - a.s);
+    const food = list.filter(d => d.is_food && L_.comboScore(d) != null)
+      .map(d => ({ id: d.id, s: L_.comboScore(d) })).sort((a, b) => b.s - a.s);
     const n = food.length, m = {};
     food.forEach((d, i) => { m[d.id] = n <= 2 ? (i === 0 ? "good" : "low") : i < n / 3 ? "good" : i < 2 * n / 3 ? "mid" : "low"; });
     return m;
   }
-  function scoreInfo(it, ranks) {
-    if (it.is_food) {
-      const t = L_.totalScore(it);
-      return { num: t == null ? "—" : (Math.round(t * 10) / 10), label: "總分", tier: t == null ? "low" : (ranks[it.id] || "low") };
-    }
+  function expInfo(it) {
     const e = L_.expTotal(it);
     return { num: e == null ? "—" : e, label: "期待", tier: e >= 4 ? "good" : e === 3 ? "mid" : "low" };
+  }
+  function foodInfo(it, ranks) {
+    if (!it.is_food) return null;
+    const c = L_.comboScore(it);
+    return { num: c == null ? "—" : (Math.round(c * 10) / 10), label: "餐飲", tier: c == null ? "low" : (ranks[it.id] || "low") };
+  }
+  function scoreBoxes(it, ranks) {
+    return [expInfo(it), foodInfo(it, ranks)].filter(Boolean)
+      .map(s => `<div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>`).join("");
+  }
+  // 依分數排序：高的在前，沒有分數的放最後；同分再比另一項分數、名稱
+  function expCompare(a, b) {
+    const ea = L_.expTotal(a) ?? -1, eb = L_.expTotal(b) ?? -1;
+    if (eb !== ea) return eb - ea;
+    const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
+    if (cb !== ca) return cb - ca;
+    return nameOf(a).localeCompare(nameOf(b), "ja");
+  }
+  function foodCompare(a, b) {
+    const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
+    if (cb !== ca) return cb - ca;
+    return expCompare(a, b);
   }
   function recCompare(a, b) {
     if (!!b.must_go !== !!a.must_go) return b.must_go ? 1 : -1;
@@ -220,7 +242,6 @@
 
   /* ---------------- 清單 ---------------- */
   function cardHtml(it, ranks, withGo) {
-    const s = scoreInfo(it, ranks);
     const c = closedInfo(it);
     const d = distOf(it);
     const subs = [esc(L_.regionLabel(it))];
@@ -235,7 +256,7 @@
         <div class="card-sub">${subs.join("")}</div>
         ${L_.goalList(it).length ? `<div class="card-goals">🎯 ${L_.goalList(it).map(g => esc(g.name)).join("、")}</div>` : ""}
       </div>
-      <div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>
+      <div class="scores">${scoreBoxes(it, ranks)}</div>
       ${withGo ? `<a class="go-btn" href="${esc(L_.navUrl(it))}" target="_blank" rel="noopener" title="用 Google Maps 導航" data-go>🧭</a>` : ""}
     </div>`;
   }
@@ -246,12 +267,16 @@
     let sort = state.sort;
     if (sort === "dist" && !state.me) sort = "rec";
     if (sort === "dist") list.sort((a, b) => (distOf(a) ?? 1e12) - (distOf(b) ?? 1e12));
+    else if (sort === "exp") list.sort(expCompare);
+    else if (sort === "food") list.sort(foodCompare);
     else list.sort(recCompare);
 
     const total = tripItems().filter(x => !x.archived).length;
     const sortNote = state.sort === "dist"
       ? (state.me ? ` · 依直線距離 <button class="link-btn" data-relocate>📍 更新位置</button>` : " · 取得位置中…（暫依推薦排序）")
-      : sort === "rec" ? " · 必去優先，再依期待度、網路評價" : "";
+      : sort === "rec" ? " · 必去優先，再依期待分數、餐飲分數"
+      : sort === "exp" ? " · 期待分數高→低"
+      : sort === "food" ? " · 餐飲分數高→低（沒有評分的排最後）" : "";
     $("#listCount").innerHTML = `${list.length} 筆${list.length !== total ? `（共 ${total} 筆）` : ""}${sortNote}`;
 
     if (!tripItems().length) {
@@ -303,9 +328,10 @@
     const c = closedInfo(it);
     const dim = c && c.dim ? " dim" : "";
     const must = it.must_go ? '<span class="must">★</span>' : "";
-    // 分數顏色（pin-good／mid／low）：餐廳依總分排名，其他依期待度
-    const s = scoreInfo(it, ranks);
-    const num = s.num === "—" ? "?" : (it.is_food ? Math.round(s.num) : s.num);
+    // 圖示：數字＝期待分數；顏色（pin-good／mid／low）餐廳依餐飲分數排名，其他依期待分數
+    const e = expInfo(it);
+    const s = { num: e.num, tier: it.is_food ? foodInfo(it, ranks).tier : e.tier };
+    const num = s.num === "—" ? "?" : s.num;
     // 抹茶：抹茶色大圖示，右下角小圓是分數
     if (L_.isMatcha(it)) return `<div class="pin matcha${sel}${dim}">🍵<span class="mscore pin-${s.tier}">${num}</span>${must}</div>`;
     if (it.is_food) return `<div class="pin pin-${s.tier}${sel}${dim}">${num}${must}</div>`;
@@ -505,8 +531,11 @@
         ${regionHtml}
       </div>
       <div class="f-sec">
-        <div class="f-row"><span>期待度至少</span><select data-sel="minExp">
+        <div class="f-row"><span>期待分數至少</span><select data-sel="minExp">
           <option value="">不限</option>${[10, 7, 5, 4, 3, 2, 1].map(n => `<option value="${n}" ${String(f.minExp) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
+        </select></div>
+        <div class="f-row"><span>餐飲分數至少<small class="small">（只列有評分的餐廳）</small></span><select data-sel="minFood">
+          <option value="">不限</option>${[8, 7.5, 7, 6.5, 4].map(n => `<option value="${n}" ${String(f.minFood) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
         </select></div>
         <div class="f-row"><span>驗證等級</span><select data-sel="verify">
           <option value="">不限</option>
@@ -591,12 +620,12 @@
     const st = sh.scrollTop;
     const openState = [...sh.querySelectorAll("details")].map(d => d.open);
     const c = closedInfo(it);
-    const total = L_.totalScore(it);
+    const food = L_.comboScore(it);
     const gm = it.gm_score != null ? `Google ${it.gm_score}` : null;
     const tb = it.tabelog_score != null ? `Tabelog ${it.tabelog_score}` : null;
     const scoreLine = it.is_food
-      ? `<b style="font-size:20px">${total ?? "—"}</b> 總分 ＝ 期待度 ${L_.expTotal(it) ?? "未填"}${gm ? " ＋ " + gm : ""}${tb ? " ＋ " + tb : ""}`
-      : `非餐飲類，看期待度${gm ? `（參考：${gm}）` : ""}`;
+      ? `期待分數 <b style="font-size:20px">${L_.expTotal(it) ?? "—"}</b>　｜　餐飲分數 <b style="font-size:20px">${food ?? "—"}</b>${gm || tb ? `（${[gm, tb].filter(Boolean).join(" ＋ ")}）` : "（沒有評分）"}`
+      : `期待分數 <b style="font-size:20px">${L_.expTotal(it) ?? "—"}</b>　非餐飲類，沒有餐飲分數${gm ? `（參考：${gm}）` : ""}`;
     // 目標：沒分數的＝含在原本期待度裡；有分數的＝追加目標，加在原本期待度上
     const goals = L_.goalList(it);
     const baseGoals = goals.filter(g => typeof g.exp !== "number").map(g => g.name);
