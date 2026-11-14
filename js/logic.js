@@ -72,6 +72,13 @@
     return "sight";
   }
   function subOf(item) { return splitCategory(item.category).sub; }
+  // 依類型集中排序用：大類依 GROUPS 順序（風景→購物→餐廳），同大類再依細類順序；不認得的細類排在該大類最後
+  function typeRank(item) {
+    const gi = GROUPS.findIndex(x => x.id === groupOf(item));
+    const subs = gi >= 0 ? GROUPS[gi].subs : [];
+    const si = subs.indexOf(subOf(item));
+    return (gi < 0 ? GROUPS.length : gi) * 100 + (si < 0 ? 99 : si);
+  }
 
   const SUB_ICON = {
     "神社寺院": "⛩️", "自然公園": "🌳", "街道地標": "🏮", "季節活動": "🎆",
@@ -248,7 +255,7 @@
 
   window.Logic = {
     round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals, expTotal,
-    GROUPS, splitCategory, groupOf, subOf, typeIcon, isGinkgo, isMatcha, verifyLevel,
+    GROUPS, splitCategory, groupOf, subOf, typeRank, typeIcon, isGinkgo, isMatcha, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
   };

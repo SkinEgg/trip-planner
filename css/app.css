@@ -96,6 +96,20 @@ a { color: var(--teal); }
 .list-count { font-size: 12.5px; color: var(--muted); margin: 2px 2px 8px; }
 .link-btn { border: 0; background: none; padding: 0 0 0 4px; color: var(--teal); font-weight: 700; font-size: 12.5px; }
 .group-head { font-size: 12.5px; font-weight: 800; color: var(--muted); margin: 14px 2px 6px; }
+/* 清單折疊分組：區域（區市）→ 車站 */
+.lg > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.lg > summary::-webkit-details-marker { display: none; }
+.lg > summary::before { content: "▸"; color: var(--muted); flex-shrink: 0; width: 12px; }
+.lg[open] > summary::before { content: "▾"; }
+.lg-name { font-weight: 800; flex: 1; min-width: 0; }
+.lg-pref { font-size: 12px; color: var(--muted); }
+.lg-n { flex-shrink: 0; min-width: 26px; text-align: center; font-size: 12.5px; font-weight: 800; color: var(--teal); background: var(--teal-soft); border-radius: 999px; padding: 1px 8px; }
+.lg-muni { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 8px; padding: 0 10px; }
+.lg-muni > summary { font-size: 16px; }
+.lg-muni[open] { padding-bottom: 8px; }
+.lg-st > summary { font-size: 14.5px; padding-left: 8px; border-top: 1px solid var(--soft); }
+.lg-st[open] > summary { margin-bottom: 4px; }
+.lg-type { font-size: 12px; font-weight: 800; color: var(--muted); margin: 8px 2px 4px; }
 .card { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 10px 10px 12px; margin-bottom: 8px; box-shadow: var(--shadow); cursor: pointer; }
 .card.dim { opacity: .55; }
 .card-icon { font-size: 22px; width: 30px; text-align: center; flex-shrink: 0; }

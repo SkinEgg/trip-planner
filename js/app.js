@@ -21,7 +21,9 @@
     tab: saved.tab || "map",
     trip: saved.trip || CFG.defaultTrip,
     date: new Date(),
-    sort: saved.sort || "rec",
+    // 「依最近車站」已改成清單本身的折疊分組，舊的設定改回預設「依類型」
+    sort: !saved.sort || saved.sort === "region" ? "type" : saved.sort,
+    listOpen: new Set(LS.get("tripapp.listopen.v1", [])),   // 清單展開中的區域／車站（只存在這台裝置）
     q: "",
     sel: null,          // 地圖上選取中的地點
     detail: null,       // 詳情開啟中的地點
@@ -179,6 +181,11 @@
     if (cb !== ca) return cb - ca;
     return expCompare(a, b);
   }
+  // 依類型集中（清單預設，2026-11-14 使用者決定）：風景→購物→餐廳，同類型內再依推薦排序
+  function typeCompare(a, b) {
+    const d = L_.typeRank(a) - L_.typeRank(b);
+    return d || recCompare(a, b);
+  }
   function recCompare(a, b) {
     if (!!b.must_go !== !!a.must_go) return b.must_go ? 1 : -1;
     const ea = L_.expTotal(a) ?? -1, eb = L_.expTotal(b) ?? -1;
@@ -265,36 +272,72 @@
     let list = filtered();
     const ranks = rankMap(list);
     let sort = state.sort;
-    if (sort === "dist" && !state.me) sort = "rec";
+    if (sort === "dist" && !state.me) sort = "type";
     if (sort === "dist") list.sort((a, b) => (distOf(a) ?? 1e12) - (distOf(b) ?? 1e12));
     else if (sort === "exp") list.sort(expCompare);
     else if (sort === "food") list.sort(foodCompare);
-    else list.sort(recCompare);
+    else if (sort === "rec") list.sort(recCompare);
+    else list.sort(typeCompare);
 
     const total = tripItems().filter(x => !x.archived).length;
+    const grouped = sort !== "dist";
     const sortNote = state.sort === "dist"
-      ? (state.me ? ` · 依直線距離 <button class="link-btn" data-relocate>📍 更新位置</button>` : " · 取得位置中…（暫依推薦排序）")
+      ? (state.me ? ` · 依直線距離 <button class="link-btn" data-relocate>📍 更新位置</button>` : " · 取得位置中…（暫依類型排序）")
       : sort === "rec" ? " · 必去優先，再依期待分數、餐飲分數"
       : sort === "exp" ? " · 期待分數高→低"
-      : sort === "food" ? " · 餐飲分數高→低（沒有評分的排最後）" : "";
-    $("#listCount").innerHTML = `${list.length} 筆${list.length !== total ? `（共 ${total} 筆）` : ""}${sortNote}`;
+      : sort === "food" ? " · 餐飲分數高→低（沒有評分的排最後）"
+      : " · 依類型集中";
+    const toggleAll = grouped && list.length ? ` · <button class="link-btn" data-expand="1">全部展開</button> <button class="link-btn" data-expand="0">全部收合</button>` : "";
+    $("#listCount").innerHTML = `${list.length} 筆${list.length !== total ? `（共 ${total} 筆）` : ""}${sortNote}${toggleAll}`;
 
     if (!tripItems().length) {
       $("#list").innerHTML = `<div class="empty">這個旅程還沒有地點。<br><button class="btn" data-pick>📚 從地點資料庫加入</button></div>`; return;
     }
     if (!list.length) { $("#list").innerHTML = `<div class="empty">目前的條件下沒有符合的地點。<br>試著放寬篩選或清除搜尋。</div>`; return; }
-    if (sort === "region") {
-      const groups = new Map();
-      // 依「區市 › 車站」分組，同一區市的車站排在一起
-      list.forEach(it => { const r = L_.splitRegion(it.region); const g = `${r.pref}／${r.muni}／${r.station}`; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(it); });
-      const names = [...groups.keys()].sort((a, b) => a.localeCompare(b, "ja"));
-      $("#list").innerHTML = names.map(g => `<div class="group-head">${esc(g.split("／").slice(1).join(" › "))}（${groups.get(g).length}）</div>` +
-        groups.get(g).map(it => cardHtml(it, ranks, true)).join("")).join("");
-    } else {
-      $("#list").innerHTML = list.map(it => cardHtml(it, ranks, true)).join("");
-    }
+    if (!grouped) { $("#list").innerHTML = list.map(it => cardHtml(it, ranks, true)).join(""); return; }
+
+    /* 折疊清單（2026-11-14 使用者決定）：區域（區市）→ 車站 兩層，點標題展開／收合。
+       區域、車站都依地點數多→少排；每個車站裡的地點依上面選的排序。
+       展開狀態記在這台裝置；搜尋時全部展開，才看得到符合的地點。 */
+    const munis = new Map();
+    list.forEach(it => {
+      const k = L_.regionKeys(it);
+      if (!munis.has(k.muni)) munis.set(k.muni, { pref: k.r.pref, name: k.r.muni, n: 0, stations: new Map() });
+      const m = munis.get(k.muni); m.n++;
+      if (!m.stations.has(k.station)) m.stations.set(k.station, { name: k.r.station, items: [] });
+      m.stations.get(k.station).items.push(it);
+    });
+    const byCount = (a, b) => b[1].n - a[1].n || a[1].name.localeCompare(b[1].name, "ja");
+    const prefs = new Set([...munis.values()].map(m => m.pref));
+    const isOpen = k => !!state.q || state.listOpen.has(state.trip + "|" + k);
+    const typeHead = sort === "type";
+    $("#list").innerHTML = [...munis.entries()].sort(byCount).map(([mk, m]) => {
+      const stations = [...m.stations.entries()].map(([sk, s]) => [sk, Object.assign(s, { n: s.items.length })]).sort(byCount);
+      const stHtml = stations.map(([sk, s]) => {
+        let lastG = null;
+        const cards = s.items.map(it => {
+          // 依類型排序時，類型換了就加一行小標，方便看出集中的區塊
+          let head = "";
+          if (typeHead) { const g = L_.GROUPS.find(x => x.id === L_.groupOf(it)); if (g && g.id !== lastG) { head = `<div class="lg-type">${g.icon} ${g.label}</div>`; lastG = g.id; } }
+          return head + cardHtml(it, ranks, true);
+        }).join("");
+        return `<details class="lg lg-st" data-k="${esc(sk)}" ${isOpen(sk) ? "open" : ""}>
+          <summary><span class="lg-name">🚉 ${esc(s.name)}</span><span class="lg-n">${s.n}</span></summary>${cards}</details>`;
+      }).join("");
+      return `<details class="lg lg-muni" data-k="${esc(mk)}" ${isOpen(mk) ? "open" : ""}>
+        <summary><span class="lg-name">${esc(m.name)}</span>${prefs.size > 1 ? `<span class="lg-pref">${esc(m.pref)}</span>` : ""}<span class="lg-n">${m.n}</span></summary>
+        <div class="lg-body">${stHtml}</div></details>`;
+    }).join("");
   }
+  function saveListOpen() { LS.set("tripapp.listopen.v1", [...state.listOpen]); }
   $("#list").addEventListener("click", e => {
+    // 點區域／車站標題：瀏覽器會自己展開收合，這裡只記下狀態
+    const sum = e.target.closest(".lg > summary");
+    if (sum) {
+      const d = sum.parentElement, key = state.trip + "|" + d.dataset.k;
+      setTimeout(() => { if (d.open) state.listOpen.add(key); else state.listOpen.delete(key); saveListOpen(); }, 0);
+      return;
+    }
     if (e.target.closest("[data-pick]")) { openPicker(); return; }
     if (e.target.closest("[data-go]")) return;   // 導航按鈕直接開 Google Maps
     const c = e.target.closest(".card"); if (c) openDetail(c.dataset.id);
@@ -306,7 +349,14 @@
     // 選了依距離但還沒有位置：直接定位（不移動地圖）
     if (state.sort === "dist" && !state.me) locate({ fly: false });
   });
-  $("#listCount").addEventListener("click", e => { if (e.target.closest("[data-relocate]")) locate({ fly: false }); });
+  $("#listCount").addEventListener("click", e => {
+    if (e.target.closest("[data-relocate]")) { locate({ fly: false }); return; }
+    const b = e.target.closest("[data-expand]"); if (!b) return;
+    // 全部展開／收合：只動這個旅程目前列出的區域與車站
+    const open = b.dataset.expand === "1";
+    $("#list").querySelectorAll(".lg").forEach(d => { const key = state.trip + "|" + d.dataset.k; if (open) state.listOpen.add(key); else state.listOpen.delete(key); });
+    saveListOpen(); renderList();
+  });
 
   /* ---------------- 地圖 ---------------- */
   let map = null, markerLayer = null, meLayer = null, refMarker = null, refPopup = null, fitted = false, centeredTrip = null;
@@ -440,7 +490,7 @@
     }, err => {
       locating = false;
       toast(err.code === 1 ? "沒有定位權限，請在瀏覽器設定允許" : "無法取得位置，請稍後再試");
-      if (state.sort === "dist" && !state.me) { state.sort = "rec"; $("#sortSel").value = "rec"; persistUi(); renderList(); }
+      if (state.sort === "dist" && !state.me) { state.sort = "type"; $("#sortSel").value = "type"; persistUi(); renderList(); }
     });
   }
   $("#locateBtn").addEventListener("click", () => locate());
