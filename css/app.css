@@ -95,7 +95,6 @@ a { color: var(--teal); }
 .list-tools select { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 0 8px; }
 .list-count { font-size: 12.5px; color: var(--muted); margin: 2px 2px 8px; }
 .link-btn { border: 0; background: none; padding: 0 0 0 4px; color: var(--teal); font-weight: 700; font-size: 12.5px; }
-.group-head { font-size: 12.5px; font-weight: 800; color: var(--muted); margin: 14px 2px 6px; }
 /* 清單折疊分組：區域（區市）→ 車站 */
 .lg > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .lg > summary::-webkit-details-marker { display: none; }
@@ -147,7 +146,7 @@ a { color: var(--teal); }
 .pin { position: relative; width: 28px; height: 28px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #fff; transition: transform .2s; }
 .pin.sq { border-radius: 8px; font-size: 15px; }
 .pin.dim { opacity: .38; }
-/* 地圖圖示的分數顏色（數字是期待分數；顏色：餐廳依餐飲分數排名、其他依期待分數；抹茶圖示右下角的分數也用這組） */
+/* 地圖圖示的顏色：餐廳依餐飲分數排名（前／中／後三分之一），其他地點固定灰色；抹茶圖示右下角的分數也用這組 */
 .pin-good { background: #2f8f55; }
 .pin-mid { background: #c08a1e; }
 .pin-low { background: #8a8072; }
@@ -215,10 +214,6 @@ a { color: var(--teal); }
 .d-actions { display: flex; gap: 8px; margin: 2px 0 12px; }
 .d-block { padding: 12px 0; border-top: 1px solid var(--soft); }
 .d-label { font-size: 12.5px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
-.exp-seg { display: flex; gap: 6px; }
-.exp-seg button { flex: 1; height: 46px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); font-weight: 800; font-size: 17px; }
-.exp-seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.exp-seg button.clear { flex: .8; font-size: 13px; font-weight: 600; color: var(--muted); }
 .kv { display: grid; grid-template-columns: 76px 1fr; gap: 6px 10px; font-size: 14px; }
 .kv .k { color: var(--muted); font-size: 13px; }
 .status-line { margin-bottom: 8px; }
@@ -267,10 +262,7 @@ details.more[open] summary::after { content: " ▴"; }
 .goal { background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13.5px; padding: 4px 11px; border-radius: 999px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .goal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .goal-row .goal { flex: 1 1 auto; max-width: max-content; }
-.goal-row select { margin-left: auto; flex-shrink: 0; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: 5px 6px; font-size: 14px; }
 .goal-del { flex-shrink: 0; border: 0; background: none; color: var(--muted); width: 30px; height: 30px; border-radius: 999px; }
-.exp-sum { margin-top: 8px; font-size: 13.5px; color: var(--muted); }
-.exp-sum b { color: var(--accent); font-size: 17px; }
 .goal-add { width: 100%; margin-bottom: 6px; border: 1px dashed var(--line); background: var(--card); color: var(--ink); border-radius: 10px; padding: 9px 11px; font-size: 16px; }
 
 /* 旅程：標題按鈕、切換清單、新增表單 */

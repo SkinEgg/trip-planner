@@ -2,7 +2,7 @@
    資料分三種（2026-10-19 起）：
    - 地點資料庫（pois）：查證過的地點資料，所有旅程共用。下次去同一個地方直接沿用。
    - 旅程（trips）：用「年月＋目的地」區分，例如 2026/11 東京。
-   - 旅程清單（trip_pois）：某個地點在某次旅程裡的設定——期待度、目標、必去／已預約、封存、狀態。
+   - 旅程清單（trip_pois）：某個地點在某次旅程裡的設定——目標、必去／已預約、封存、狀態。
      這些只屬於那次旅程，不寫進地點資料庫。
    畫面拿到的 items() 是「目前旅程」的清單：地點資料＋這次旅程的設定合在一起。
    修改一樣是「欄位層級」：只送出改了的欄位，寫入時比對版本，不會蓋掉別人（或 Claude）同時改的其他欄位。
@@ -16,6 +16,7 @@
     del(k) { try { localStorage.removeItem(k); } catch (e) { } }
   };
   // 只屬於某次旅程的欄位：存在旅程清單，不進地點資料庫
+  // （expectation 是 2026-11-22 取消的期待度，App 不再使用；留著是為了匯入舊 JSON 時仍歸到旅程清單，不混進地點資料庫）
   const TRIP_FIELDS = ["expectation", "goals", "must_go", "archived", "archive_date", "archive_reason", "status"];
   const isTripField = k => TRIP_FIELDS.includes(k);
 
@@ -50,7 +51,7 @@
   }
   function withDefaults(it) {
     if (!Array.isArray(it.tags)) it.tags = [];
-    // 目標：這個地點這次要去做什麼（可多個；沒提出就空著），格式 [{ name, exp? }]
+    // 目標：這個地點這次要去做什麼（可多個；沒提出就空著），格式 [{ name, done? }]（舊資料的 exp 不再使用）
     it.goals = window.Logic.goalList(it);
     // 圖片：資料本身沒有時，用 data/photos.js 的整理結果
     const ph = window.SEED_PHOTOS && window.SEED_PHOTOS[it.id];
@@ -415,7 +416,7 @@
       commit();
     },
 
-    /* 把地點資料庫裡已有的地點加進目前旅程（期待度、目標等從空白開始） */
+    /* 把地點資料庫裡已有的地點加進目前旅程（目標、必去等從空白開始） */
     addToTrip(poiId, fields) {
       if (!places.has(poiId) || plans.has(planKey(curTrip, poiId))) return;
       const data = Object.assign({ goals: [], must_go: false, archived: false }, fields || {});

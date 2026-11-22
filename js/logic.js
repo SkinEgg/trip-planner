@@ -246,9 +246,9 @@
   ];
 
   window.Logic = {
-    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals,
+    esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals,
     GROUPS, splitCategory, groupOf, subOf, typeRank, typeIcon, isGinkgo, isMatcha, verifyLevel,
-    NO_STATION, splitRegion, regionKeys, regionLabel,
+    regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
   };
 })();
