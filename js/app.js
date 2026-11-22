@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.22";
+  const APP_VERSION = "2026.11.22b";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -161,14 +161,13 @@
     return { num: c == null ? "—" : (Math.round(c * 10) / 10), label: "餐飲", tier: c == null ? "low" : (ranks[it.id] || "low") };
   }
   function scoreBoxes(it, ranks) {
-    return [foodInfo(it, ranks)].filter(Boolean)
-      .map(s => `<div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>`).join("");
+    const s = foodInfo(it, ranks);
+    return s ? `<div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>` : "";
   }
   // 依餐飲分數排序：高的在前，沒有分數的放最後；同分再比名稱
+  const foodScoreOf = it => L_.comboScore(it) ?? -1;
   function foodCompare(a, b) {
-    const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
-    if (cb !== ca) return cb - ca;
-    return nameOf(a).localeCompare(nameOf(b), "ja");
+    return foodScoreOf(b) - foodScoreOf(a) || nameOf(a).localeCompare(nameOf(b), "ja");
   }
   // 依類型集中（清單預設，2026-11-14 使用者決定）：風景→購物→餐廳，同類型內再依推薦排序
   function typeCompare(a, b) {
@@ -177,9 +176,7 @@
   }
   function recCompare(a, b) {
     if (!!b.must_go !== !!a.must_go) return b.must_go ? 1 : -1;
-    const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
-    if (cb !== ca) return cb - ca;
-    return nameOf(a).localeCompare(nameOf(b), "ja");
+    return foodCompare(a, b);
   }
   function distOf(it) { return state.me && Array.isArray(it.coord) ? L_.distanceM(state.me, it.coord) : null; }
 
@@ -1614,7 +1611,7 @@
     if (!name) return;
     const it = {
       id: L_.newId(), trip: state.trip, name, name_clean: name, region: "未分類待確認", region_note: null,
-      category: "", is_food: false, tags: [], goals: [], expectation: null, must_go: false,
+      category: "", is_food: false, tags: [], goals: [], must_go: false,
       gm_score: null, gm_note: "", gm_tier: null, tabelog_score: null, tabelog_note: "", tabelog_tier: null,
       hours: "", closed: "", verify: "🔴未驗證（新增，尚未查證）", status: "候選（剛新增）", confidence: "",
       address: "", notes: "", cautions: "", user_notes: "", source: "使用者手動新增", coord: null, archived: false
@@ -1652,12 +1649,12 @@
           const fields = {};
           Object.keys(inc).forEach(k => {
             if (k === "id" || k === "_v" || inc[k] === undefined) return;
-            if (["expectation", "must_go", "archived"].includes(k) && inc[k] == null) return;   // 沒給值就保留你填的
+            if (["must_go", "archived"].includes(k) && inc[k] == null) return;   // 沒給值就保留你填的
             if (JSON.stringify(inc[k]) !== JSON.stringify(ex[k])) fields[k] = inc[k];
           });
           if (Object.keys(fields).length) updates.push([ex.id, fields]);
         } else {
-          adds.push(Object.assign({ id: L_.newId(), trip: state.trip, archived: false, must_go: false, expectation: null, tags: [], goals: [] }, inc));
+          adds.push(Object.assign({ id: L_.newId(), trip: state.trip, archived: false, must_go: false, tags: [], goals: [] }, inc));
         }
       });
       if (!updates.length && !adds.length && !joins.length) { alert("資料都一樣，沒有需要更新的地方。"); return; }
