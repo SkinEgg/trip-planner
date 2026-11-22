@@ -9,20 +9,21 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.14";
+  const APP_VERSION = "2026.11.22";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
   /* ---------------- 狀態 ---------------- */
   const saved = LS.get("tripapp.ui.v1", {});
   // 篩選的預設值（「全部清除」也回到這裡）
-  const FILTER_DEFAULTS = () => ({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minExp: "", minFood: "", hideClosed: false, showArchived: false });
+  const FILTER_DEFAULTS = () => ({ must: false, groups: [], subs: [], prefs: [], munis: [], regions: [], tags: [], goals: [], verify: "", minFood: "", hideClosed: false, showArchived: false });
   const state = {
     tab: saved.tab || "map",
     trip: saved.trip || CFG.defaultTrip,
     date: new Date(),
     // 「依最近車站」已改成清單本身的折疊分組，舊的設定改回預設「依類型」
-    sort: !saved.sort || saved.sort === "region" ? "type" : saved.sort,
+    // 舊的「期待分數」排序已取消（2026-11-22），改回推薦排序
+    sort: !saved.sort || saved.sort === "region" ? "type" : saved.sort === "exp" ? "rec" : saved.sort,
     listOpen: new Set(LS.get("tripapp.listopen.v1", [])),   // 清單展開中的區域／車站（只存在這台裝置）
     q: "",
     sel: null,          // 地圖上選取中的地點
@@ -129,12 +130,11 @@
     if (f.tags.length && !(it.tags || []).some(t => f.tags.includes(t))) return false;
     if (f.goals.length && !L_.goalList(it).some(g => f.goals.includes(g.name))) return false;
     if (f.verify && L_.verifyLevel(it.verify) !== f.verify) return false;
-    if (f.minExp && !(L_.expTotal(it) != null && L_.expTotal(it) >= +f.minExp)) return false;
     // 餐飲分數至少：只留下有評分、達到門檻的餐廳（非餐飲沒有餐飲分數，一併排除）
     if (f.minFood && !(L_.comboScore(it) != null && L_.comboScore(it) >= +f.minFood)) return false;
     if (f.hideClosed) { const c = L_.closedOn(it, state.date).level; if (c === "closed" || c === "gone") return false; }
     if (state.q) {
-      const hay = L_.norm([it.name, it.name_clean, it.region, it.category, it.address, it.notes, it.cautions, it.user_notes, (it.tags || []).join(" "), L_.goalList(it).map(g => g.name).join(" ")].join(" "));
+      const hay = L_.norm([it.name, it.name_clean, it.region, it.category, it.address, it.notes, it.cautions, it.user_notes, it.highlights, (it.tags || []).join(" "), L_.goalList(it).map(g => g.name).join(" ")].join(" "));
       if (!hay.includes(L_.norm(state.q))) return false;
     }
     return true;
@@ -142,12 +142,12 @@
   function filtered() { return tripItems().filter(passes); }
   function activeFilterCount() {
     const f = state.f;
-    return f.prefs.length + f.munis.length + f.regions.length + f.subs.length + f.tags.length + f.goals.length + (f.verify ? 1 : 0) + (f.minExp ? 1 : 0) + (f.minFood ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
+    return f.prefs.length + f.munis.length + f.regions.length + f.subs.length + f.tags.length + f.goals.length + (f.verify ? 1 : 0) + (f.minFood ? 1 : 0) + (f.hideClosed ? 1 : 0) + (f.showArchived ? 1 : 0);
   }
 
-  /* 分數顯示（2026-11-14 使用者決定拆開，不再相加）：
-     - 期待分數：所有地點都顯示（期待度＋追加目標），4 以上綠、3 黃、其他灰
-     - 餐飲分數：只有餐飲類（Google＋Tabelog），顏色依目前篩選結果中的相對排名（前／中／後三分之一） */
+  /* 分數顯示（2026-11-22 使用者決定取消期待評分，只保留餐飲分數）：
+     - 餐飲分數：只有餐飲類（Google＋Tabelog），顏色依目前篩選結果中的相對排名（前／中／後三分之一）
+     - 非餐飲類沒有分數 */
   function rankMap(list) {
     const food = list.filter(d => d.is_food && L_.comboScore(d) != null)
       .map(d => ({ id: d.id, s: L_.comboScore(d) })).sort((a, b) => b.s - a.s);
@@ -155,31 +155,20 @@
     food.forEach((d, i) => { m[d.id] = n <= 2 ? (i === 0 ? "good" : "low") : i < n / 3 ? "good" : i < 2 * n / 3 ? "mid" : "low"; });
     return m;
   }
-  function expInfo(it) {
-    const e = L_.expTotal(it);
-    return { num: e == null ? "—" : e, label: "期待", tier: e >= 4 ? "good" : e === 3 ? "mid" : "low" };
-  }
   function foodInfo(it, ranks) {
     if (!it.is_food) return null;
     const c = L_.comboScore(it);
     return { num: c == null ? "—" : (Math.round(c * 10) / 10), label: "餐飲", tier: c == null ? "low" : (ranks[it.id] || "low") };
   }
   function scoreBoxes(it, ranks) {
-    return [expInfo(it), foodInfo(it, ranks)].filter(Boolean)
+    return [foodInfo(it, ranks)].filter(Boolean)
       .map(s => `<div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>`).join("");
   }
-  // 依分數排序：高的在前，沒有分數的放最後；同分再比另一項分數、名稱
-  function expCompare(a, b) {
-    const ea = L_.expTotal(a) ?? -1, eb = L_.expTotal(b) ?? -1;
-    if (eb !== ea) return eb - ea;
-    const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
-    if (cb !== ca) return cb - ca;
-    return nameOf(a).localeCompare(nameOf(b), "ja");
-  }
+  // 依餐飲分數排序：高的在前，沒有分數的放最後；同分再比名稱
   function foodCompare(a, b) {
     const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
     if (cb !== ca) return cb - ca;
-    return expCompare(a, b);
+    return nameOf(a).localeCompare(nameOf(b), "ja");
   }
   // 依類型集中（清單預設，2026-11-14 使用者決定）：風景→購物→餐廳，同類型內再依推薦排序
   function typeCompare(a, b) {
@@ -188,8 +177,6 @@
   }
   function recCompare(a, b) {
     if (!!b.must_go !== !!a.must_go) return b.must_go ? 1 : -1;
-    const ea = L_.expTotal(a) ?? -1, eb = L_.expTotal(b) ?? -1;
-    if (eb !== ea) return eb - ea;
     const ca = L_.comboScore(a) ?? -1, cb = L_.comboScore(b) ?? -1;
     if (cb !== ca) return cb - ca;
     return nameOf(a).localeCompare(nameOf(b), "ja");
@@ -274,7 +261,6 @@
     let sort = state.sort;
     if (sort === "dist" && !state.me) sort = "type";
     if (sort === "dist") list.sort((a, b) => (distOf(a) ?? 1e12) - (distOf(b) ?? 1e12));
-    else if (sort === "exp") list.sort(expCompare);
     else if (sort === "food") list.sort(foodCompare);
     else if (sort === "rec") list.sort(recCompare);
     else list.sort(typeCompare);
@@ -283,8 +269,7 @@
     const grouped = sort !== "dist";
     const sortNote = state.sort === "dist"
       ? (state.me ? ` · 依直線距離 <button class="link-btn" data-relocate>📍 更新位置</button>` : " · 取得位置中…（暫依類型排序）")
-      : sort === "rec" ? " · 必去優先，再依期待分數、餐飲分數"
-      : sort === "exp" ? " · 期待分數高→低"
+      : sort === "rec" ? " · 必去優先，再依餐飲分數"
       : sort === "food" ? " · 餐飲分數高→低（沒有評分的排最後）"
       : " · 依類型集中";
     const toggleAll = grouped && list.length ? ` · <button class="link-btn" data-expand="1">全部展開</button> <button class="link-btn" data-expand="0">全部收合</button>` : "";
@@ -378,9 +363,8 @@
     const c = closedInfo(it);
     const dim = c && c.dim ? " dim" : "";
     const must = it.must_go ? '<span class="must">★</span>' : "";
-    // 圖示：數字＝期待分數；顏色（pin-good／mid／low）餐廳依餐飲分數排名，其他依期待分數
-    const e = expInfo(it);
-    const s = { num: e.num, tier: it.is_food ? foodInfo(it, ranks).tier : e.tier };
+    // 圖示：餐廳＝數字是餐飲分數、顏色依餐飲分數排名；其他地點沒有分數，用類型圖示、灰色
+    const s = it.is_food ? foodInfo(it, ranks) : { num: "—", tier: "low" };
     const num = s.num === "—" ? "?" : s.num;
     // 抹茶：抹茶色大圖示，右下角小圓是分數
     if (L_.isMatcha(it)) return `<div class="pin matcha${sel}${dim}">🍵<span class="mscore pin-${s.tier}">${num}</span>${must}</div>`;
@@ -581,9 +565,6 @@
         ${regionHtml}
       </div>
       <div class="f-sec">
-        <div class="f-row"><span>期待分數至少</span><select data-sel="minExp">
-          <option value="">不限</option>${[10, 7, 5, 4, 3, 2, 1].map(n => `<option value="${n}" ${String(f.minExp) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
-        </select></div>
         <div class="f-row"><span>餐飲分數至少<small class="small">（只列有評分的餐廳）</small></span><select data-sel="minFood">
           <option value="">不限</option>${[8, 7.5, 7, 6.5, 4].map(n => `<option value="${n}" ${String(f.minFood) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
         </select></div>
@@ -673,22 +654,14 @@
     const food = L_.comboScore(it);
     const gm = it.gm_score != null ? `Google ${it.gm_score}` : null;
     const tb = it.tabelog_score != null ? `Tabelog ${it.tabelog_score}` : null;
+    // 分數只保留餐飲分數（2026-11-22）；非餐飲類不顯示分數區塊
     const scoreLine = it.is_food
-      ? `期待分數 <b style="font-size:20px">${L_.expTotal(it) ?? "—"}</b>　｜　餐飲分數 <b style="font-size:20px">${food ?? "—"}</b>${gm || tb ? `（${[gm, tb].filter(Boolean).join(" ＋ ")}）` : "（沒有評分）"}`
-      : `期待分數 <b style="font-size:20px">${L_.expTotal(it) ?? "—"}</b>　非餐飲類，沒有餐飲分數${gm ? `（參考：${gm}）` : ""}`;
-    // 目標：沒分數的＝含在原本期待度裡；有分數的＝追加目標，加在原本期待度上
-    const goals = L_.goalList(it);
-    const baseGoals = goals.filter(g => typeof g.exp !== "number").map(g => g.name);
-    const extraGoals = goals.filter(g => typeof g.exp === "number");
-    const expSum = extraGoals.length
-      ? `<div class="exp-sum">期待度合計 <b>${L_.expTotal(it)}</b> ＝ 原本 ${it.expectation ?? "未填"}${baseGoals.length ? `（${esc(baseGoals.join("、"))}）` : ""}${extraGoals.map(g => ` ＋ ${esc(g.name)} ${g.exp}`).join("")}</div>`
+      ? `餐飲分數 <b style="font-size:20px">${food ?? "—"}</b>${gm || tb ? `（${[gm, tb].filter(Boolean).join(" ＋ ")}）` : "（沒有評分）"}`
       : "";
+    // 目標：只是清單，不計分（2026-11-22）
+    const goals = L_.goalList(it);
     const goalRows = goals.map(g => `<div class="goal-row">
         <span class="goal">${g.done ? '<span title="已完成">✅ </span>' : ""}${esc(g.name)}</span>
-        <select data-goal-exp="${esc(g.name)}" aria-label="${esc(g.name)} 的期待度">
-          <option value="" ${typeof g.exp === "number" ? "" : "selected"}>含在原本期待度</option>
-          ${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${g.exp === n ? "selected" : ""}>＋${n}</option>`).join("")}
-        </select>
         <button class="goal-del" data-goal-del="${esc(g.name)}" aria-label="移除目標 ${esc(g.name)}">✕</button>
       </div>`).join("");
     const goalOptions = [...new Set(tripItems().flatMap(x => L_.goalList(x).map(g => g.name)))].filter(n => !goals.some(g => g.name === n));
@@ -736,25 +709,18 @@
         ${it.coord ? '<button class="btn" data-act="onmap">📍 地圖</button>' : ""}
       </div>
       <div class="d-block">
-        <div class="d-label">${extraGoals.length ? "原本期待度" : "期待度"}</div>
-        <div class="exp-seg">${[1, 2, 3, 4, 5].map(n => `<button data-exp="${n}" class="${it.expectation === n ? "on" : ""}">${n}</button>`).join("")}
-          <button class="clear" data-exp="">清除</button></div>
-        ${expSum}
-      </div>
-      <div class="d-block">
         <div class="d-label">🎯 目標</div>
         ${goalRows || '<div class="small" style="margin-bottom:8px">（未設定）</div>'}
         <input class="goal-add" data-edit="goal-add" list="goalOptions" placeholder="＋ 新增目標（可用、分隔多個）">
         <datalist id="goalOptions">${goalOptions.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
-        <div class="small">新目標選「＋分數」就會加到期待度合計；選「含在原本期待度」則不加分。</div>
       </div>
-      <div class="d-block">
+      ${scoreLine ? `<div class="d-block">
         <div class="d-label">分數</div>
         <div>${scoreLine}</div>
-      </div>
+      </div>` : ""}
       <div class="d-block">
         <div class="kv">
-          ${kv("地區", (it.region || "").split("／").join(" › "))}${kv("類型", it.category)}${kv("營業時間", it.hours)}${kv("公休", it.closed)}${kv("地址", it.address)}
+          ${kv("地區", (it.region || "").split("／").join(" › "))}${kv("類型", it.category)}${kv("營業時間", it.hours)}${kv("公休", it.closed)}${kv("地址", it.address)}${kv("特色", it.highlights)}
         </div>
         ${it.cautions ? `<div class="note-box caution"><b>⚠️ 注意事項</b>${esc(it.cautions)}</div>` : ""}
         ${it.user_notes ? `<div class="note-box mine"><b>📝 我的備註</b>${esc(it.user_notes)}</div>` : ""}
@@ -778,6 +744,7 @@
         <div class="edit-grid">
           ${field("region", "地區（縣市／區市／車站）")}${categoryField(it)}${field("tags", "標籤（用、分隔）")}
           ${field("hours", "營業時間")}${field("closed", "公休日")}${field("address", "地址")}
+          ${field("highlights", "特色（御守、推薦料理等）", true)}
           ${field("user_notes", "備註（自己加註，例：需排隊）", true)}${field("cautions", "注意事項（只營業特定時段、需預約等）", true)}
           ${field("verify", "驗證等級")}${field("notes", "查證筆記（AI 查證紀錄）", true)}
         </div>
@@ -800,13 +767,6 @@
     const id = state.detail; const it = id && getItem(id);
     if (e.target.closest("[data-close]")) { closeOverlay(); return; }
     if (!it) return;
-    const exp = e.target.closest("[data-exp]");
-    if (exp) {
-      const v = exp.dataset.exp === "" ? null : +exp.dataset.exp;
-      window.Store.patch(id, { expectation: v });
-      toast(v == null ? "已清除期待度" : "期待度 " + v);
-      return;
-    }
     const gd = e.target.closest("[data-goal-del]");
     if (gd) {
       window.Store.patch(id, { goals: L_.goalList(it).filter(g => g.name !== gd.dataset.goalDel) });
@@ -817,7 +777,7 @@
     if (a.dataset.act === "must") window.Store.patch(id, { must_go: !it.must_go });
     if (a.dataset.act === "onmap") { closeOverlay(); switchTab("map"); setTimeout(() => selectOnMap(id), 120); }
     if (a.dataset.act === "untrip") {
-      if (!confirm(`把「${nameOf(it)}」從「${tripCfg().name}」移除？\n查證過的地點資料會留在資料庫，之後可以再加回來；這次的期待度、目標、必去會清掉。`)) return;
+      if (!confirm(`把「${nameOf(it)}」從「${tripCfg().name}」移除？\n查證過的地點資料會留在資料庫，之後可以再加回來；這次的目標、必去會清掉。`)) return;
       closeOverlay();
       window.Store.removeFromTrip(id);
       toast("已從這個旅程移除");
@@ -835,17 +795,6 @@
   });
   $("#detailSheet").addEventListener("change", e => {
     const t = e.target;
-    if (t.dataset.goalExp != null && state.detail) {
-      const v = t.value === "" ? null : +t.value;
-      const goals = L_.goalList(getItem(state.detail)).map(g => {
-        if (g.name !== t.dataset.goalExp) return g;
-        const o = Object.assign({}, g); delete o.exp; if (v != null) o.exp = v; return o;
-      });
-      t.blur();
-      window.Store.patch(state.detail, { goals });
-      toast("期待度合計 " + (L_.expTotal(getItem(state.detail)) ?? "未填"));
-      return;
-    }
     const key = t.dataset.edit; if (!key || !state.detail) return;
     const fields = {};
     if (key === "tags") fields.tags = splitList(t.value);
@@ -854,12 +803,12 @@
       const add = [...new Set(splitList(t.value))].filter(s => s && !cur.some(g => g.name === s));
       t.value = ""; t.blur();
       if (!add.length) return;
-      // 使用者規則（2026-10-19）：已預約的一律必去，「已預約…」目標期待度 +5
+      // 使用者規則（2026-10-19）：已預約的一律必去（2026-11-22 起目標不計分）
       const booked = add.some(n => n.startsWith("已預約"));
-      fields.goals = cur.concat(add.map(name => name.startsWith("已預約") ? { name, exp: 5 } : { name }));
+      fields.goals = cur.concat(add.map(name => ({ name })));
       if (booked) fields.must_go = true;
       window.Store.patch(state.detail, fields);
-      toast(booked ? "已預約：設為必去、期待度 +5" : "已新增目標；選「＋分數」就會加到期待度");
+      toast(booked ? "已預約：設為必去" : "已新增目標");
       return;
     }
     else if (key === "cat-main") {
@@ -884,7 +833,7 @@
   }
 
   /* ---------------- 旅程（切換／新增） ----------------
-     每個旅程有自己的清單；期待度、目標、必去、封存只算在那個旅程。地點的查證資料所有旅程共用。 */
+     每個旅程有自己的清單；目標、必去、封存只算在那個旅程。地點的查證資料所有旅程共用。 */
   $("#tripTitle").addEventListener("click", openTrips);
   function openTrips() { showOverlay("trip"); renderTrips(); }
   function tripCounts() {
@@ -897,7 +846,7 @@
     const ym = ymd(new Date()).slice(0, 7);
     $("#tripSheet").innerHTML = `
       <div class="sheet-head"><h2>旅程</h2><button class="icon-btn" data-close aria-label="關閉">✕</button></div>
-      <p class="small">每個旅程有自己的清單。期待度、目標、必去、封存只算在那個旅程；地點的查證資料所有旅程共用。</p>
+      <p class="small">每個旅程有自己的清單。目標、必去、封存只算在那個旅程；地點的查證資料所有旅程共用。</p>
       <div class="trip-list">${S.trips().map(t => `<button class="trip-row ${t.id === state.trip ? "on" : ""}" data-trip="${esc(t.id)}">
           <span class="trip-name">${esc(t.name)}</span><span class="small">${c[t.id] || 0} 個地點</span></button>`).join("")}</div>
       <form class="trip-new" id="tripNewForm">
@@ -949,7 +898,7 @@
   }
 
   /* ---------------- 從地點資料庫加入 ----------------
-     以前旅程查證過的地點直接加進這次旅程，不用重新查證；期待度、目標、必去從空白開始 */
+     以前旅程查證過的地點直接加進這次旅程，不用重新查證；目標、必去從空白開始 */
   let pickQ = "";
   function openPicker() {
     showOverlay("pick");
@@ -1155,7 +1104,7 @@
   function renderNow() { const el = $("#nowCard"); if (el) el.innerHTML = nowHtml(); }
 
   /* 目標清單：這個旅程所有地點的目標，依目標名稱分組；可勾選完成（存在旅程清單的 goals[].done，不影響分數） */
-  const goalLabel = g => esc(g.name) + (typeof g.exp === "number" ? `<small> +${g.exp}</small>` : "");
+  const goalLabel = g => esc(g.name);
   function goalGroups() {
     const groups = new Map();
     tripItems().filter(it => !it.archived).forEach(it => L_.goalList(it).forEach(g => {
@@ -1163,11 +1112,10 @@
       groups.get(g.name).push({ it, g });
     }));
     return [...groups.entries()].map(([name, rows]) => {
-      rows.sort((a, b) => (!!a.g.done - !!b.g.done) || ((distOf(a.it) ?? 1e9) - (distOf(b.it) ?? 1e9)) ||((L_.expTotal(b.it) ?? 0) - (L_.expTotal(a.it) ?? 0)));
+      rows.sort((a, b) => (!!a.g.done - !!b.g.done) || ((distOf(a.it) ?? 1e9) - (distOf(b.it) ?? 1e9)));
       const done = rows.filter(r => r.g.done).length;
-      const exp = Math.max(...rows.map(r => typeof r.g.exp === "number" ? r.g.exp : 0));
-      return { name, rows, done, exp };
-    }).sort((a, b) => ((a.done === a.rows.length) - (b.done === b.rows.length)) || (b.exp - a.exp) || a.name.localeCompare(b.name, "zh-Hant"));
+      return { name, rows, done };
+    }).sort((a, b) => ((a.done === a.rows.length) - (b.done === b.rows.length)) || a.name.localeCompare(b.name, "zh-Hant"));
   }
   const goalGrpOpen = new Set();   // 展開中的目標（重畫後保持）
   function goalsHtml() {
@@ -1184,7 +1132,7 @@
         const hint = gr.rows.length > 1 ? `最近：${nameOf(next.it)}${nd != null ? ` ${L_.fmtDistance(nd)}` : ""}` : nameOf(next.it);
         return `<details class="goal-grp ${allOk ? "all-done" : ""}" data-ggrp="${esc(gr.name)}" ${goalGrpOpen.has(gr.name) ? "open" : ""}>
         <summary class="goal-head">
-          <span class="goal-name">${allOk ? "✅ " : ""}${esc(gr.name)}${gr.exp ? `<small> +${gr.exp}</small>` : ""}
+          <span class="goal-name">${allOk ? "✅ " : ""}${esc(gr.name)}
             <span class="goal-hint">${esc(hint)}</span></span>
           <span class="small">${gr.rows.length > 1 ? `${gr.done}/${gr.rows.length} 處` : allOk ? "已完成" : "1 處"}</span>
           ${gr.rows.length > 1 ? `<button class="link-btn" data-gall="${esc(gr.name)}">${allOk ? "取消完成" : "整組完成"}</button>` : ""}
@@ -1607,7 +1555,6 @@
   function renderMore() {
     const S = window.Store;
     const items = tripItems();
-    const filled = items.filter(x => x.expectation != null).length;
     const must = items.filter(x => x.must_go).length;
     const arch = items.filter(x => x.archived).length;
     const p = platform();
@@ -1627,7 +1574,7 @@
       </div>
       <div class="panel">
         <h3>${esc(tripCfg().name)}</h3>
-        <p>候選 ${items.length - arch} 筆（封存 ${arch} 筆）· 必去 ${must} 筆 · 已填期待度 ${filled} 筆</p>
+        <p>候選 ${items.length - arch} 筆（封存 ${arch} 筆）· 必去 ${must} 筆</p>
         <div class="btn-col">
           <button class="btn" data-m="trips">🧳 切換／新增旅程</button>
           <button class="btn" data-m="pick">📚 從地點資料庫加入</button>
