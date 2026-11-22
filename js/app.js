@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.22b";
+  const APP_VERSION = "2026.11.22c";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -668,7 +668,7 @@
       c ? `<span class="badge ${c.cls}">${esc(c.text)}</span>` : "",
       { ok: "✅ 已驗證", partial: "🟡 部分驗證", warn: "🔴 未驗證／有疑慮", none: "" }[L_.verifyLevel(it.verify)]
     ].filter(Boolean).join(" ");
-    const kv = (k, v) => v ? `<div class="k">${k}</div><div>${esc(v)}</div>` : "";
+    const kv = (k, v, cls) => v ? `<div class="k">${k}</div><div${cls ? ` class="${cls}"` : ""}>${esc(v)}</div>` : "";
     // 圖片：網址型直接從來源網站讀取（不複製檔案）；storage 型是使用者提供、放在 Supabase 私人空間的圖，
     // 登入後才取得臨時網址。讀不到就整張隱藏
     const photos = (Array.isArray(it.photos) ? it.photos : []).filter(p => p && (p.url || p.storage));
@@ -717,7 +717,7 @@
       </div>` : ""}
       <div class="d-block">
         <div class="kv">
-          ${kv("地區", (it.region || "").split("／").join(" › "))}${kv("類型", it.category)}${kv("營業時間", it.hours)}${kv("公休", it.closed)}${kv("地址", it.address)}${kv("特色", it.highlights)}
+          ${kv("地區", (it.region || "").split("／").join(" › "))}${kv("類型", it.category)}${kv("營業時間", it.hours)}${kv("公休", it.closed)}${kv("地址", it.address)}${kv("特色", it.highlights, "kv-lines")}
         </div>
         ${it.cautions ? `<div class="note-box caution"><b>⚠️ 注意事項</b>${esc(it.cautions)}</div>` : ""}
         ${it.user_notes ? `<div class="note-box mine"><b>📝 我的備註</b>${esc(it.user_notes)}</div>` : ""}
