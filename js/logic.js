@@ -1,7 +1,7 @@
 /* 純邏輯：評分、分類、篩選、當天公休判斷。不碰畫面，方便之後測試與沿用。
-   評分規則（2026-11-14 使用者決定拆開，不再相加成總分）：
-   - 期待分數（expTotal）：所有地點都有＝原本期待度＋追加目標的分數
+   評分規則（2026-11-22 使用者決定取消期待評分，分數只保留餐飲評分）：
    - 餐飲分數（comboScore）：只有餐飲類＝Google 評分＋Tabelog 評分（有幾個加幾個）
+   - 期待度（expectation）、目標分數（goals[].exp）不再顯示也不再計分；舊資料留在資料庫不刪
    - 必去是獨立標記，不進分數 */
 (function () {
   "use strict";
@@ -33,9 +33,7 @@
     if (!vals.length) return null;
     return round2(vals.reduce((a, b) => a + b, 0));
   }
-  /* 目標與期待度合計（使用者 2026-10-19 決定）：原本的期待度（expectation）不動；
-     之後追加的目標可以各自有期待度（goals[].exp），加在原本的上面。
-     例：飛木稲荷 欣賞銀杏（原本 4）＋ 蕾絲銀杏御守 3 ＝ 7。沒有分數的目標＝已含在原本期待度裡 */
+  /* 目標：去這個地點要做什麼（2026-11-22 起只是清單，不計分；舊資料的 goals[].exp 忽略） */
   function goalList(item) {
     return (Array.isArray(item.goals) ? item.goals : [])
       .map(g => typeof g === "string" ? { name: g } : g)
@@ -43,12 +41,6 @@
   }
   // 還沒完成的目標（使用者在目標清單勾選完成的會帶 done: true；完成不影響分數）
   function openGoals(item) { return goalList(item).filter(g => !g.done); }
-  function expTotal(item) {
-    const base = typeof item.expectation === "number" ? item.expectation : null;
-    const extra = goalList(item).filter(g => typeof g.exp === "number");
-    if (base == null && !extra.length) return null;
-    return (base || 0) + extra.reduce((a, g) => a + g.exp, 0);
-  }
 
   /* 類型分兩層（使用者 2026-10-15 決定）：類型欄位寫成「大類／細類」，例如「餐廳／拉麵」。
      大類只有三種；細類是篩選第二層。改這裡就會同時改篩選選單與編輯選單。 */
@@ -254,7 +246,7 @@
   ];
 
   window.Logic = {
-    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals, expTotal,
+    round2, esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals,
     GROUPS, splitCategory, groupOf, subOf, typeRank, typeIcon, isGinkgo, isMatcha, verifyLevel,
     NO_STATION, splitRegion, regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
