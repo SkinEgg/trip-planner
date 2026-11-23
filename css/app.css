@@ -216,6 +216,7 @@ a { color: var(--teal); }
 .d-label { font-size: 12.5px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
 .kv { display: grid; grid-template-columns: 76px 1fr; gap: 6px 10px; font-size: 14px; }
 .kv .k { color: var(--muted); font-size: 13px; }
+.kv .kv-lines { white-space: pre-line; }  /* 特色：一行一點（1️⃣ 2️⃣ …） */
 .status-line { margin-bottom: 8px; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .tag { background: var(--soft); color: var(--muted); font-size: 12.5px; padding: 2px 9px; border-radius: 999px; }
