@@ -9,7 +9,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   };
-  const APP_VERSION = "2026.11.22c";
+  const APP_VERSION = "2026.11.27a";
 
   const GINKGO_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5V13" stroke="#8a6508" stroke-width="1.8" stroke-linecap="round"/><path d="M12 13.5C7 13.5 2.6 10 2.6 5.8 5.2 3.3 8.6 2.7 11.2 3.6L12 7.4l.8-3.8c2.6-.9 6-.3 8.6 2.2 0 4.2-4.4 7.7-9.4 7.7Z" fill="#f2c230" stroke="#b8860b" stroke-width="1"/><path d="M12 13V8.2M12 13 8 6.5M12 13l4-6.5" stroke="#d49a12" stroke-width=".7" fill="none"/></svg>';
 
@@ -160,9 +160,16 @@
     const c = L_.comboScore(it);
     return { num: c == null ? "—" : (Math.round(c * 10) / 10), label: "餐飲", tier: c == null ? "low" : (ranks[it.id] || "low") };
   }
+  // 重複分數（2026-11-27）：「重複提及 ×N」每重複一次 1 分，所有類型都顯示；沒有重複就不顯示
   function scoreBoxes(it, ranks) {
     const s = foodInfo(it, ranks);
-    return s ? `<div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>` : "";
+    const r = L_.repeatScore(it);
+    return (r != null ? `<div class="score t-rep" title="重複提及，每重複一次 1 分">${r}<small>重複</small></div>` : "")
+      + (s ? `<div class="score t-${s.tier}">${s.num}<small>${s.label}</small></div>` : "");
+  }
+  // 依重複分數排序：多的在前，沒有重複的放最後；同分再依餐飲分數
+  function repeatCompare(a, b) {
+    return (L_.repeatScore(b) ?? 0) - (L_.repeatScore(a) ?? 0) || foodCompare(a, b);
   }
   // 依餐飲分數排序：高的在前，沒有分數的放最後；同分再比名稱
   const foodScoreOf = it => L_.comboScore(it) ?? -1;
@@ -259,15 +266,18 @@
     if (sort === "dist" && !state.me) sort = "type";
     if (sort === "dist") list.sort((a, b) => (distOf(a) ?? 1e12) - (distOf(b) ?? 1e12));
     else if (sort === "food") list.sort(foodCompare);
+    else if (sort === "repeat") list.sort(repeatCompare);
     else if (sort === "rec") list.sort(recCompare);
     else list.sort(typeCompare);
 
     const total = tripItems().filter(x => !x.archived).length;
-    const grouped = sort !== "dist";
+    // 距離、重複提及排序不分組，最前面就是最近／最常被提到的
+    const grouped = sort !== "dist" && sort !== "repeat";
     const sortNote = state.sort === "dist"
       ? (state.me ? ` · 依直線距離 <button class="link-btn" data-relocate>📍 更新位置</button>` : " · 取得位置中…（暫依類型排序）")
       : sort === "rec" ? " · 必去優先，再依餐飲分數"
       : sort === "food" ? " · 餐飲分數高→低（沒有評分的排最後）"
+      : sort === "repeat" ? " · 重複提及多→少（沒有重複的排最後）"
       : " · 依類型集中";
     const toggleAll = grouped && list.length ? ` · <button class="link-btn" data-expand="1">全部展開</button> <button class="link-btn" data-expand="0">全部收合</button>` : "";
     $("#listCount").innerHTML = `${list.length} 筆${list.length !== total ? `（共 ${total} 筆）` : ""}${sortNote}${toggleAll}`;
@@ -652,9 +662,14 @@
     const gm = it.gm_score != null ? `Google ${it.gm_score}` : null;
     const tb = it.tabelog_score != null ? `Tabelog ${it.tabelog_score}` : null;
     // 分數只保留餐飲分數（2026-11-22）；非餐飲類不顯示分數區塊
-    const scoreLine = it.is_food
-      ? `餐飲分數 <b style="font-size:20px">${food ?? "—"}</b>${gm || tb ? `（${[gm, tb].filter(Boolean).join(" ＋ ")}）` : "（沒有評分）"}`
-      : "";
+    // 重複分數（2026-11-27）：「重複提及 ×N」每重複一次 1 分
+    const rep = L_.repeatScore(it);
+    const scoreLine = [
+      it.is_food
+        ? `餐飲分數 <b style="font-size:20px">${food ?? "—"}</b>${gm || tb ? `（${[gm, tb].filter(Boolean).join(" ＋ ")}）` : "（沒有評分）"}`
+        : "",
+      rep != null ? `重複分數 <b style="font-size:20px">${rep}</b>（總共提到 ${rep + 1} 次，每重複一次 1 分）` : ""
+    ].filter(Boolean).join("<br>");
     // 目標：只是清單，不計分（2026-11-22）
     const goals = L_.goalList(it);
     const goalRows = goals.map(g => `<div class="goal-row">
