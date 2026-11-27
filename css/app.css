@@ -7,6 +7,7 @@
   --good: #2f8f55; --good-soft: #e3f3e8;
   --mid: #b98219; --mid-soft: #faf0d8;
   --low: #8a8072; --low-soft: #eeeae2;
+  --rep: #5b3fb3; --rep-soft: #ece6fb;
   --bad: #c0392b; --bad-soft: #fae3e0;
   --pink: #c23b74; --pink-soft: #f7e3ec;
   --shadow: 0 2px 12px rgba(60, 45, 20, .12);
@@ -25,6 +26,7 @@
     --good: #6bc98c; --good-soft: #1c3024;
     --mid: #e0b659; --mid-soft: #332a14;
     --low: #9a9184; --low-soft: #2c2922;
+    --rep: #c9b8ff; --rep-soft: #2f2650;
     --bad: #e2756a; --bad-soft: #3a2220;
     --pink: #e078a8; --pink-soft: #3a2430;
     --shadow: 0 2px 12px rgba(0, 0, 0, .4);
@@ -39,6 +41,7 @@
   --good: #6bc98c; --good-soft: #1c3024;
   --mid: #e0b659; --mid-soft: #332a14;
   --low: #9a9184; --low-soft: #2c2922;
+    --rep: #c9b8ff; --rep-soft: #2f2650;
   --bad: #e2756a; --bad-soft: #3a2220;
   --pink: #e078a8; --pink-soft: #3a2430;
   --shadow: 0 2px 12px rgba(0, 0, 0, .4);
@@ -123,6 +126,7 @@ a { color: var(--teal); }
 .t-good { background: var(--good-soft); color: var(--good); }
 .t-mid { background: var(--mid-soft); color: var(--mid); }
 .t-low { background: var(--low-soft); color: var(--low); }
+.t-rep { background: var(--rep-soft); color: var(--rep); }
 .go-btn { flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--teal); background: var(--teal-soft); color: var(--teal); font-size: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
 .badge { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
 .b-closed { background: var(--bad-soft); color: var(--bad); }

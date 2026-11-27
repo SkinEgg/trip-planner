@@ -2,6 +2,7 @@
    評分規則（2026-11-22 使用者決定取消期待評分，分數只保留餐飲評分）：
    - 餐飲分數（comboScore）：只有餐飲類＝Google 評分＋Tabelog 評分（有幾個加幾個）
    - 期待度（expectation）、目標分數（goals[].exp）不再顯示也不再計分；舊資料留在資料庫不刪
+   - 重複分數（repeatScore，2026-11-27 使用者決定）：目標「重複提及 ×N」每重複一次 1 分＝N−1，所有類型都有
    - 必去是獨立標記，不進分數 */
 (function () {
   "use strict";
@@ -41,6 +42,16 @@
   }
   // 還沒完成的目標（使用者在目標清單勾選完成的會帶 done: true；完成不影響分數）
   function openGoals(item) { return goalList(item).filter(g => !g.done); }
+  /* 重複分數（2026-11-27 使用者決定「重複一次一分」）：從目標名稱「重複提及 ×N」讀出總共提到 N 次，
+     第一次不算，之後每重複一次 1 分＝N−1。沒有這個目標＝null。舊資料的 goals[].exp 不使用 */
+  function repeatScore(item) {
+    let n = 0;
+    for (const g of goalList(item)) {
+      const m = /重複提及\s*[×xX＊*]\s*(\d+)/.exec(g.name);
+      if (m) n = Math.max(n, +m[1]);
+    }
+    return n >= 2 ? n - 1 : null;
+  }
 
   /* 類型分兩層（使用者 2026-10-15 決定）：類型欄位寫成「大類／細類」，例如「餐廳／拉麵」。
      大類只有三種；細類是篩選第二層。改這裡就會同時改篩選選單與編輯選單。 */
@@ -246,7 +257,7 @@
   ];
 
   window.Logic = {
-    esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals,
+    esc, norm, deriveIsFood, gmTierOf, tabelogTierOf, comboScore, goalList, openGoals, repeatScore,
     GROUPS, splitCategory, groupOf, subOf, typeRank, typeIcon, isGinkgo, isMatcha, verifyLevel,
     regionKeys, regionLabel,
     closedOn, sameDay, dateLabel, distanceM, fmtDistance, newId, mapsUrl, navUrl, travelMinutes, SUGGEST
